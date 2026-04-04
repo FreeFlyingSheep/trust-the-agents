@@ -1,0 +1,9 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# OS specific ignores
+.DS_Store
+
+# VSCode specific ignores
+.vscode/

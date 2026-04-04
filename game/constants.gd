@@ -1,0 +1,127 @@
+class_name Constants
+extends Node
+
+# Metadata
+const VERSION := "v0.1.0"
+const RANDOM_SEED := 271828
+
+# Core run configuration
+const TOTAL_ROUNDS := 3
+const ROUND_DURATION_SECONDS := 120
+const TICK_SECONDS := 1
+const KPI_TARGET := 100.0
+const MAX_AGENTS := 3
+const MAX_ACTIVE_INCIDENTS := 3
+
+# Initial state
+const INITIAL_ROUND_INDEX := 1
+const INITIAL_BUDGET := 100.0
+const INITIAL_ENTROPY := 0.0
+const INITIAL_KPI := 0.0
+const INITIAL_STABILITY := 100.0
+const INITIAL_MODEL_INTELLIGENCE := true
+const INITIAL_REVIEW_ID := 1
+const INITIAL_INCIDENT_ID := 1
+const INITIAL_AGENT_SUFFIX := 2
+
+# Time drift
+const STABILITY_DECAY_PER_TICK := 0.3
+const ENTROPY_GROWTH_PER_TICK := 0.5
+
+# Economy
+const AGENT_COST_PLANNER := 0.6
+const AGENT_COST_GENERATOR := 1.4
+const AGENT_COST_EVALUATOR := 0.6
+const BUDGET_OPTIMIZATION_COST_MULTIPLIER := 0.7
+
+# Planner
+const PLANNER_ENTROPY_REDUCTION_PER_TICK := 0.6
+
+# Review
+const REVIEW_GENERATE_CHANCE := 0.8
+const REVIEW_APPROVE_GOOD_KPI_GAIN := 10.0
+const REVIEW_APPROVE_BAD_STABILITY_LOSS := 15.0
+const REVIEW_DENY_GOOD_STABILITY_LOSS := 5.0
+const EVALUATOR_AUTO_APPROVE_CHANCE := 0.5
+const EVALUATOR_AUTO_REVIEW_ERROR_RATE_OK := 0.1
+const EVALUATOR_AUTO_REVIEW_ERROR_RATE_UNSTABLE := 0.8
+const EVALUATOR_AUTO_REVIEW_ERROR_RATE_DRIFTING := 0.5
+const BAD_REVIEW_PROBABILITY_SMART := 0.20
+const BAD_REVIEW_PROBABILITY_NOT_SMART := 0.45
+
+# Incident
+const INCIDENT_BASE_CHANCE := 0.03
+const INCIDENT_CHANCE_BONUS_AT_100_ENTROPY := 0.07
+const INCIDENT_GRACE_SECONDS := 15
+const SYSTEM_NOISE_PROB_PER_ONLINE_AGENT := 0.1
+const RETRY_STORM_NOISE_PROB_BONUS := 0.4
+const RETRY_STORM_ENTROPY_GAIN := 3.0
+const INCIDENT_TARGET_ENTROPY_GAIN := 3.0
+const INCIDENT_CREATE_ENTROPY_GAIN := 2.0
+
+# Round identity and seeded entities
+const USER_KEYS_BY_ROUND: Array[String] = ["USER1", "USER2", "USER3"]
+const PREVIOUS_USER_KEY_DEFAULT := "USER0"
+const INITIAL_AGENT_SEEDS := [
+	{"id": "planner-1", "type": "PLANNER"},
+	{"id": "generator-1", "type": "GENERATOR"},
+	{"id": "evaluator-1", "type": "EVALUATOR"},
+]
+const AGENT_TYPES: Array[String] = [
+	"PLANNER",
+	"GENERATOR",
+	"EVALUATOR",
+]
+const INCIDENT_TYPES: Array[String] = [
+	"RETRY_STORM",
+	"PROMPT_DRIFT",
+	"MEMORY_CONTAMINATION",
+	"BUDGET_OPTIMIZATION",
+	"PRODUCTION_CREATIVITY",
+]
+const INCIDENT_TYPE_TO_AGENT := {
+	"PROMPT_DRIFT": "PLANNER",
+	"PRODUCTION_CREATIVITY": "GENERATOR",
+	"MEMORY_CONTAMINATION": "EVALUATOR",
+}
+
+# Console command and boot output
+const CONSOLE_COMMANDS := [
+	"agents",
+	"approve <agent>",
+	"deny <agent>",
+	"help",
+	"incidents",
+	"inspect <target>",
+	"kill <agent>",
+	"mute <agent>",
+	"patch <incident>",
+	"run <planner|generator|evaluator>",
+	"status",
+	"trust <agent>",
+]
+const CONSOLE_COMMANDS_REQUIRE_TARGET := [
+	"approve",
+	"deny",
+	"inspect",
+	"kill",
+	"mute",
+	"patch",
+	"run",
+	"trust",
+]
+
+# End-of-run categorization
+const CONSOLE_FINAL_BUCKET_DOMINANT_THRESHOLD := 2
+const CONSOLE_FINAL_BUCKET_SHUTDOWN := "SHUTDOWN"
+const CONSOLE_FINAL_BUCKET_LIQUIDATION := "LIQUIDATION"
+const CONSOLE_FINAL_BUCKET_PIVOT := "PIVOT"
+const CONSOLE_FINAL_BUCKET_REDUNDANCY := "REDUNDANCY"
+const CONSOLE_FINAL_BUCKET_EXIT := "EXIT"
+const CONSOLE_FINAL_BUCKET_ACQUISITION := "ACQUISITION"
+const CONSOLE_FINAL_BUCKET_SPINOFF := "SPINOFF"
+const CONSOLE_FINAL_BUCKET_REORG := "REORG"
+
+# Log pacing
+const LOG_DELAY_MIN_SECONDS := 0.5
+const LOG_DELAY_MAX_SECONDS := 1.0
