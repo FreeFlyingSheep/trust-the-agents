@@ -1,27 +1,58 @@
 extends Node2D
 
-enum LoginPhase { BOOT_STREAMING, WAITING_LOGIN, POST_LOGIN_STREAM, READY }
+enum LoginPhase { WAITING_LOGIN, READY }
 
 var ui_root: Control
 var title_label: Label
 var hotkey_hint_label: Label
 var time_label: Label
 var round_label: Label
-var log_view: RichTextLabel
-var prompt_label: Label
-var input_line: LineEdit
 var status_title_label: Label
-var commands_title_label: Label
+var agents_title_label: Label
+var reviews_title_label: Label
+var incidents_title_label: Label
+var incident_hint_label: Label
+var mail_title_label: Label
+var agents_list_container: Control
+var task_slots_container: VBoxContainer
+var review_slots_container: VBoxContainer
+var log_view: RichTextLabel
+var mail_list: ItemList
+var mail_detail_view: RichTextLabel
 
 var status_name_labels: Dictionary = {}
 var status_value_labels: Dictionary = {}
-var log_history: Array[Dictionary] = []
-var scripted_log_items: Array[Dictionary] = []
-var next_scripted_log_delay_seconds: float = -1.0
-var login_phase: int = LoginPhase.BOOT_STREAMING
+var last_agent_board_signature: String = ""
+var last_review_signature: String = ""
+var login_phase: int = LoginPhase.WAITING_LOGIN
+var pending_review_items: Array[Dictionary] = []
+var system_focus_text: String = ""
+var agent_activity_text: Dictionary = {}
+var feed: Feed
+var board: Board
 
 var game: Game
 var console: Console
+
+
+func _t(key: String) -> String:
+	var translated := tr(key)
+	assert(translated != key, "Missing translation key: %s" % key)
+	return translated
+
+
+func _tf(key: String, args: Array = []) -> String:
+	var template := _t(key)
+	if args.is_empty():
+		assert(template.find("%") == -1, "Unexpected format pattern in key: %s" % key)
+		return template
+	assert(template.find("%") != -1, "Missing format pattern in key: %s" % key)
+	return template % args
+
+
+func _reason_text(reason: String) -> String:
+	var key := "REASON_%s" % reason.to_upper()
+	return _t(key)
 
 
 func _ready() -> void:
@@ -32,78 +63,466 @@ func _ready() -> void:
 		TranslationServer.set_locale("en")
 	game = Game.new()
 	console = Console.new()
+	feed = Feed.new()
+	board = Board.new()
 	_build_ui()
-	_start_boot_sequence(console.build_boot_logs())
+	login_phase = LoginPhase.WAITING_LOGIN
+	system_focus_text = ""
+	feed.append_immediate_logs(console.build_boot_logs())
+	_on_login_confirmed()
 	_refresh_chrome()
-	input_line.keep_editing_on_text_submit = true
-	input_line.grab_focus()
-	input_line.text_submitted.connect(_on_command_submitted)
 
 
 func _build_ui() -> void:
-	var ui := Ui.new().build(self, "", console.status_items(game), console.command_rows())
+	var ui := Ui.new().build(self, "", console.status_items(game))
 	ui_root = ui["ui_root"]
 	title_label = ui["title_label"]
 	hotkey_hint_label = ui["hotkey_hint_label"]
 	time_label = ui["time_label"]
 	round_label = ui["round_label"]
 	status_title_label = ui["status_title_label"]
-	commands_title_label = ui["commands_title_label"]
+	agents_title_label = ui["agents_title_label"]
+	reviews_title_label = ui["reviews_title_label"]
+	incidents_title_label = ui["incidents_title_label"]
+	incident_hint_label = ui["incident_hint_label"]
+	mail_title_label = ui["mail_title_label"]
 	status_name_labels = ui["status_name_labels"]
-	log_view = ui["log_view"]
-	prompt_label = ui["prompt_label"]
-	input_line = ui["input_line"]
 	status_value_labels = ui["status_value_labels"]
+	agents_list_container = ui["agents_list_container"]
+	task_slots_container = ui["task_slots_container"]
+	review_slots_container = ui["review_slots_container"]
+	log_view = ui["log_view"]
+	mail_list = ui["mail_list"]
+	mail_detail_view = ui["mail_detail_view"]
+	feed.bind_views(log_view, mail_list, mail_detail_view)
+	_wire_action_handlers()
 	_refresh_locale_ui()
 
 
-func _on_command_submitted(raw_input: String) -> void:
-	var response := console.handle_input(raw_input, game)
-	var response_logs: Array[Dictionary] = []
-	for item in response["logs"]:
-		response_logs.append(item)
-	_append_logs(response_logs)
-	input_line.clear()
+func _wire_action_handlers() -> void:
+	assert(mail_list != null)
+	mail_list.item_selected.connect(_on_mail_selected)
 
+
+func _emit_events(events: Array[Dictionary]) -> void:
+	_apply_event_feedback(events)
+	_append_event_logs(events)
 	_handle_round_transition_if_needed()
 	_refresh_chrome()
-	if input_line.editable:
-		input_line.call_deferred("grab_focus")
 
 
 func _process(delta: float) -> void:
-	var tick_events := game.advance_time(delta)
-	if not tick_events.is_empty():
-		_append_logs(console.map_events(tick_events, game))
-		_handle_round_transition_if_needed()
-	_drain_scripted_log_queue(delta)
+	if game.run_state == Game.RunState.RUNNING and login_phase == LoginPhase.READY:
+		var tick_events := game.advance_time(delta)
+		if not tick_events.is_empty():
+			_emit_events(tick_events)
+	feed.flush(delta)
+	_handle_round_transition_if_needed()
 	_refresh_chrome()
+
+
+func _apply_event_feedback(events: Array[Dictionary]) -> void:
+	for event in events:
+		assert(event.has("type"))
+		match event["type"]:
+			"task_planned":
+				assert(event.has("target"))
+				assert(event.has("task_id"))
+				agent_activity_text[event["target"]] = _tf(
+					"ACTIVITY_TASK_PLANNED", [event["task_id"]]
+				)
+				system_focus_text = _tf("FOCUS_TASK_PLANNED", [event["target"], event["task_id"]])
+			"task_step_started":
+				assert(event.has("target"))
+				assert(event.has("task_id"))
+				assert(event.has("step"))
+				agent_activity_text[event["target"]] = _tf(
+					"ACTIVITY_TASK_STEP_STARTED", [event["step"], event["task_id"]]
+				)
+				system_focus_text = _tf("FOCUS_TASK_STEP_STARTED", [event["target"], event["step"]])
+			"tool_completed":
+				assert(event.has("target"))
+				assert(event.has("tool"))
+				agent_activity_text[event["target"]] = _tf(
+					"ACTIVITY_TOOL_COMPLETED", [event["tool"]]
+				)
+				system_focus_text = _tf("FOCUS_TOOL_COMPLETED", [event["target"], event["tool"]])
+			"review_requested":
+				assert(event.has("target"))
+				agent_activity_text[event["target"]] = _t("ACTIVITY_REVIEW_REQUESTED")
+				system_focus_text = _tf("FOCUS_REVIEW_REQUESTED", [event["target"]])
+			"review_resolved":
+				assert(event.has("target"))
+				assert(event.has("approved"))
+				if event["approved"]:
+					agent_activity_text[event["target"]] = _t("ACTIVITY_REVIEW_APPROVED")
+					system_focus_text = _tf("FOCUS_REVIEW_APPROVED", [event["target"]])
+				else:
+					agent_activity_text[event["target"]] = _t("ACTIVITY_REVIEW_DENIED")
+					system_focus_text = _tf("FOCUS_REVIEW_DENIED", [event["target"]])
+			"task_applied":
+				assert(event.has("target"))
+				assert(event.has("task_id"))
+				agent_activity_text[event["target"]] = _tf(
+					"ACTIVITY_TASK_APPLIED", [event["task_id"]]
+				)
+				system_focus_text = _tf("FOCUS_TASK_APPLIED", [event["target"], event["task_id"]])
+			"task_canceled":
+				assert(event.has("target"))
+				assert(event.has("reason"))
+				var reason_text := _reason_text(event["reason"])
+				agent_activity_text[event["target"]] = _tf("ACTIVITY_TASK_CANCELED", [reason_text])
+				system_focus_text = _tf("FOCUS_TASK_CANCELED", [event["target"], reason_text])
+			"task_replanned":
+				assert(event.has("target"))
+				assert(event.has("task_id"))
+				agent_activity_text[event["target"]] = _tf(
+					"ACTIVITY_TASK_REPLANNED", [event["task_id"]]
+				)
+				system_focus_text = _tf("FOCUS_TASK_REPLANNED", [event["target"], event["task_id"]])
+			"replan_skipped":
+				assert(event.has("reason"))
+				system_focus_text = _tf("FOCUS_REPLAN_SKIPPED", [_reason_text(event["reason"])])
+			"incident_created":
+				assert(event.has("target"))
+				assert(event.has("incident"))
+				agent_activity_text[event["target"]] = _tf(
+					"ACTIVITY_INCIDENT_CREATED", [tr(event["incident"])]
+				)
+				system_focus_text = _tf(
+					"FOCUS_INCIDENT_CREATED", [event["target"], tr(event["incident"])]
+				)
+			"incident_applied":
+				assert(event.has("target"))
+				assert(event.has("incident"))
+				agent_activity_text[event["target"]] = _tf(
+					"ACTIVITY_INCIDENT_APPLIED", [tr(event["incident"])]
+				)
+				system_focus_text = _tf(
+					"FOCUS_INCIDENT_APPLIED", [event["target"], tr(event["incident"])]
+				)
+			"incident_patched":
+				assert(event.has("target"))
+				assert(event.has("incident"))
+				agent_activity_text[event["target"]] = _tf(
+					"ACTIVITY_INCIDENT_PATCHED", [tr(event["incident"])]
+				)
+				system_focus_text = _tf(
+					"FOCUS_INCIDENT_PATCHED", [tr(event["incident"]), event["target"]]
+				)
+			"agent_killed":
+				assert(event.has("target"))
+				agent_activity_text[event["target"]] = _t("ACTIVITY_AGENT_OFFLINE")
+				system_focus_text = _tf("FOCUS_AGENT_OFFLINE", [event["target"]])
+			"agent_ran":
+				assert(event.has("target"))
+				agent_activity_text[event["target"]] = _t("ACTIVITY_AGENT_ONLINE")
+				system_focus_text = _tf("FOCUS_AGENT_ONLINE", [event["target"]])
+			"trust_toggled":
+				assert(event.has("target"))
+				system_focus_text = _tf("FOCUS_TRUST_TOGGLED", [event["target"]])
+			"mute_toggled":
+				assert(event.has("target"))
+				system_focus_text = _tf("FOCUS_MUTE_TOGGLED", [event["target"]])
+			"round_ended":
+				system_focus_text = _t("FOCUS_ROUND_ENDED")
+			_:
+				assert(false, "Unknown event type in _apply_event_feedback")
 
 
 func _handle_round_transition_if_needed() -> void:
 	if game.run_state != Game.RunState.ENDING:
 		return
-	var continue_play := game.has_more_rounds()
-	var transition_logs := console.build_round_transition_logs(game)
-	if continue_play:
-		_start_boot_sequence(transition_logs)
+	if game.has_more_rounds():
+		var transition_logs := console.build_round_transition_logs(game)
+		feed.append_immediate_logs(transition_logs)
+		login_phase = LoginPhase.WAITING_LOGIN
+		system_focus_text = _t("FOCUS_NEXT_ROUND")
+		last_agent_board_signature = ""
+		_on_login_confirmed()
 		return
-	_append_logs(transition_logs)
-	input_line.editable = false
+	var final_logs := console.build_round_transition_logs(game)
+	feed.append_immediate_logs(final_logs)
+	login_phase = LoginPhase.READY
+	system_focus_text = _t("FOCUS_SIMULATION_COMPLETED")
 
 
 func _refresh_chrome() -> void:
-	var logged_in := game.run_state == Game.RunState.RUNNING
+	var logged_in := game.run_state == Game.RunState.RUNNING and login_phase == LoginPhase.READY
 	time_label.text = console.time_text(game)
 	round_label.text = console.round_text(game)
-	prompt_label.visible = logged_in
-	if logged_in:
-		prompt_label.text = console.prompt_text(game)
-	else:
-		prompt_label.text = ""
-	input_line.editable = logged_in
-	input_line.caret_blink = logged_in
 	_refresh_status_values()
+	_refresh_task_slots(logged_in)
+	_refresh_review_targets()
+	_refresh_review_slots(logged_in)
+	_refresh_agent_board(logged_in)
+
+
+func _refresh_task_slots(logged_in: bool) -> void:
+	board.refresh_task_slots(task_slots_container, logged_in, _goal_phase_tasks())
+
+
+func _goal_phase_tasks() -> Array[Dictionary]:
+	var goal: Dictionary = game.get_goal_snapshot()
+	var status: Dictionary = game.get_status_snapshot()
+	assert(goal.has("kpi_target"))
+	assert(goal.has("status"))
+	assert(status.has("kpi"))
+	var target: float = goal["kpi_target"]
+	var current: float = status["kpi"]
+	assert(Constants.GOAL_PHASE_TASK_COUNT >= 1)
+	assert(Constants.GOAL_PHASE_TASK_KEYS.size() == Constants.GOAL_PHASE_TASK_COUNT)
+	var rows: Array[Dictionary] = []
+	var all_previous_done := true
+	for index in range(Constants.GOAL_PHASE_TASK_COUNT):
+		var stage_target := target * float(index + 1) / float(Constants.GOAL_PHASE_TASK_COUNT)
+		var stage_status := "WAITING"
+		if current >= stage_target:
+			stage_status = "DONE"
+		elif all_previous_done and goal["status"] == Constants.GOAL_STATUS_ACTIVE:
+			stage_status = "ACTIVE"
+		elif goal["status"] in [Constants.GOAL_STATUS_FAILED, Constants.GOAL_STATUS_CANCELED]:
+			stage_status = "FAILED"
+		(
+			rows
+			. append(
+				{
+					"id": "phase-%d" % (index + 1),
+					"content": _t(Constants.GOAL_PHASE_TASK_KEYS[index]),
+					"status": stage_status,
+				}
+			)
+		)
+		if stage_status != "DONE":
+			all_previous_done = false
+	return rows
+
+
+func _refresh_review_targets() -> void:
+	pending_review_items.clear()
+	for agent in game.get_agent_snapshot():
+		assert(agent.has("id"))
+		assert(agent.has("has_pending_review"))
+		if not agent["has_pending_review"]:
+			continue
+		assert(agent.has("pending_review_id"))
+		var ticket_id: String = agent["pending_review_id"]
+		assert(not ticket_id.is_empty())
+		assert(game.review_tickets.has(ticket_id))
+		var ticket: Dictionary = game.review_tickets[ticket_id]
+		assert(ticket.has("task_id"))
+		var task_id: String = ticket["task_id"]
+		assert(game.tasks.has(task_id))
+		var task: Dictionary = game.tasks[task_id]
+		assert(task.has("current_step"))
+		assert(task.has("steps"))
+		assert(task["current_step"] >= 0)
+		assert(task["current_step"] < task["steps"].size())
+		var review_item := {
+			"ticket_id": ticket_id,
+			"task_id": task_id,
+			"agent_id": agent["id"],
+			"step": task["steps"][task["current_step"]],
+		}
+		pending_review_items.append(review_item)
+
+
+func _refresh_review_slots(logged_in: bool) -> void:
+	var signature_parts: Array[String] = []
+	for item in pending_review_items:
+		assert(item.has("ticket_id"))
+		assert(item.has("task_id"))
+		assert(item.has("agent_id"))
+		assert(item.has("step"))
+		signature_parts.append(
+			"%s|%s|%s|%s" % [item["ticket_id"], item["task_id"], item["agent_id"], item["step"]]
+		)
+	var signature := "%s|%s" % [logged_in, ";".join(signature_parts)]
+	if signature == last_review_signature:
+		return
+	last_review_signature = signature
+	board.refresh_review_slots(
+		review_slots_container,
+		logged_in,
+		pending_review_items,
+		_on_review_slot_approve_pressed,
+		_on_review_slot_deny_pressed
+	)
+
+
+func _append_event_logs(events: Array[Dictionary]) -> void:
+	var mapped_logs := console.map_tick_events(events, game)
+	feed.queue_mapped_logs(mapped_logs)
+
+
+func _on_mail_selected(index: int) -> void:
+	feed.on_mail_selected(index)
+
+
+func _refresh_locale_ui() -> void:
+	title_label.text = tr("TITLE")
+	hotkey_hint_label.text = ""
+	status_title_label.text = tr("STATUS")
+	agents_title_label.text = tr("AGENTS")
+	reviews_title_label.text = tr("REVIEWS")
+	incidents_title_label.text = tr("INCIDENTS")
+	mail_title_label.text = tr("MAIL")
+	incident_hint_label.text = tr("INCIDENT_PANEL_HINT")
+	for key in status_name_labels.keys():
+		var label: Label = status_name_labels[key]
+		assert(label != null)
+		label.text = tr(key)
+	feed.rerender_views()
+	last_agent_board_signature = ""
+	last_review_signature = ""
+
+
+func _refresh_agent_board(logged_in: bool) -> void:
+	var snapshot: Array[Dictionary] = []
+	for agent in game.get_agent_snapshot():
+		assert(agent.has("online"))
+		if not agent["online"]:
+			continue
+		snapshot.append(agent)
+	last_agent_board_signature = (
+		board
+		. refresh_agent_board(
+			agents_list_container,
+			snapshot,
+			{
+				"logged_in": logged_in,
+				"login_phase": login_phase,
+				"game": game,
+				"agent_activity_text": agent_activity_text,
+				"last_signature": last_agent_board_signature,
+				"on_trust": _on_agent_trust_pressed,
+				"on_mute": _on_agent_mute_pressed,
+				"on_patch": _on_agent_patch_pressed,
+				"on_kill": _on_agent_kill_pressed,
+				"on_add": _on_agent_add_pressed,
+			}
+		)
+	)
+
+
+func _resolve_review_for_ticket(ticket_id: String, approved: bool) -> void:
+	assert(not ticket_id.is_empty())
+	assert(game.run_state == Game.RunState.RUNNING)
+	assert(game.review_tickets.has(ticket_id))
+	assert(game.review_tickets[ticket_id]["status"] == Constants.REVIEW_STATUS_PENDING)
+	var events: Array[Dictionary] = []
+	var resolved: Dictionary = game.flow._resolve_review_ticket(
+		game, ticket_id, approved, "human-reviewer", "HUMAN"
+	)
+	assert(not resolved.is_empty())
+	events.append(resolved)
+	if not approved:
+		assert(game.tasks.has(resolved["task_id"]))
+		var rejected_task: Dictionary = game.tasks[resolved["task_id"]]
+		var replanned: Dictionary = game.flow._replan_for_canceled_task(
+			game, rejected_task, "review_denied_manual"
+		)
+		if replanned["ok"]:
+			var replacement: Dictionary = replanned["task"]
+			(
+				events
+				. append(
+					{
+						"type": "task_replanned",
+						"from_task_id": rejected_task["id"],
+						"task_id": replacement["id"],
+						"target": replacement["agent_id"],
+					}
+				)
+			)
+		else:
+			(
+				events
+				. append(
+					{
+						"type": "replan_skipped",
+						"task_id": rejected_task["id"],
+						"reason": replanned["reason"],
+					}
+				)
+			)
+	_emit_events(events)
+
+
+func _on_login_confirmed() -> void:
+	assert(login_phase == LoginPhase.WAITING_LOGIN)
+	assert(game.run_state == Game.RunState.BOOTING)
+	var login_logs := console.finish_boot_and_build_login_logs(game)
+	assert(not login_logs.is_empty())
+	feed.append_immediate_logs(login_logs)
+	login_phase = LoginPhase.READY
+	system_focus_text = _t("FOCUS_ROUND_STARTED")
+	_refresh_chrome()
+
+
+func _on_review_slot_approve_pressed(ticket_id: String) -> void:
+	assert(game.run_state == Game.RunState.RUNNING)
+	assert(_has_pending_review_ticket(ticket_id))
+	_resolve_review_for_ticket(ticket_id, true)
+
+
+func _on_review_slot_deny_pressed(ticket_id: String) -> void:
+	assert(game.run_state == Game.RunState.RUNNING)
+	assert(_has_pending_review_ticket(ticket_id))
+	_resolve_review_for_ticket(ticket_id, false)
+
+
+func _has_pending_review_ticket(ticket_id: String) -> bool:
+	for item in pending_review_items:
+		if item["ticket_id"] == ticket_id:
+			return true
+	return false
+
+
+func _on_agent_trust_pressed(agent_id: String) -> void:
+	assert(game.run_state == Game.RunState.RUNNING)
+	var trust_result := game.toggle_agent_flag(agent_id, "trusted")
+	assert(trust_result["ok"])
+	_emit_events([{"type": "trust_toggled", "target": trust_result["target"]}])
+
+
+func _on_agent_mute_pressed(agent_id: String) -> void:
+	assert(game.run_state == Game.RunState.RUNNING)
+	var mute_result := game.toggle_agent_flag(agent_id, "muted")
+	assert(mute_result["ok"])
+	_emit_events([{"type": "mute_toggled", "target": mute_result["target"]}])
+
+
+func _on_agent_kill_pressed(agent_id: String) -> void:
+	assert(game.run_state == Game.RunState.RUNNING)
+	var kill_result := game.kill_agent(agent_id)
+	assert(kill_result["ok"])
+	var events: Array[Dictionary] = []
+	for event in kill_result["events"]:
+		events.append(event)
+	_emit_events(events)
+
+
+func _on_agent_patch_pressed(agent_id: String) -> void:
+	assert(game.run_state == Game.RunState.RUNNING)
+	var patch_result := game.start_patch_for_agent(agent_id)
+	assert(patch_result["ok"])
+	assert(patch_result.has("duration_ticks"))
+	var target_id: String = patch_result["target"]
+	agent_activity_text[target_id] = _tf("ACTIVITY_PATCHING", [patch_result["duration_ticks"]])
+	if patch_result["patched_incident_present"]:
+		system_focus_text = _tf("FOCUS_PATCH_STARTED", [target_id, tr(patch_result["incident"])])
+	else:
+		system_focus_text = _tf("FOCUS_PATCH_PREVENTIVE", [target_id])
+	_refresh_chrome()
+
+
+func _on_agent_add_pressed(role: String) -> void:
+	assert(game.run_state == Game.RunState.RUNNING)
+	assert(role in Constants.AGENT_TYPES)
+	var run_target := game.run_agent(role)
+	assert(not run_target.is_empty())
+	_emit_events([{"type": "agent_ran", "target": run_target}])
 
 
 func _toggle_language() -> void:
@@ -115,33 +534,17 @@ func _toggle_language() -> void:
 	_refresh_chrome()
 
 
-func _refresh_locale_ui() -> void:
-	title_label.text = tr("TITLE")
-	hotkey_hint_label.text = tr("HOTKEY_HINT")
-	status_title_label.text = tr("STATUS")
-	commands_title_label.text = tr("COMMANDS")
-	for key in status_name_labels.keys():
-		var label: Label = status_name_labels[key]
-		if label != null:
-			label.text = tr(key)
-	_rerender_log_history()
+func _toggle_fullscreen() -> void:
+	var mode := DisplayServer.window_get_mode()
+	if mode == DisplayServer.WINDOW_MODE_FULLSCREEN:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	else:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 
 
 func _input(event: InputEvent) -> void:
 	var handled := false
-	if event is InputEventMouseButton:
-		var mouse_event := event as InputEventMouseButton
-		var is_wheel := (
-			mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP
-			or mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN
-			or mouse_event.button_index == MOUSE_BUTTON_WHEEL_LEFT
-			or mouse_event.button_index == MOUSE_BUTTON_WHEEL_RIGHT
-		)
-		if not is_wheel:
-			handled = true
-	elif event is InputEventMouseMotion:
-		handled = true
-	elif event is InputEventKey and event.pressed and not event.echo:
+	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
 			get_tree().quit()
 			handled = true
@@ -151,177 +554,19 @@ func _input(event: InputEvent) -> void:
 		elif event.keycode == KEY_F2:
 			_toggle_fullscreen()
 			handled = true
-		elif (
-			(event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER)
-			and login_phase == LoginPhase.WAITING_LOGIN
-		):
-			_on_login_confirmed()
-			handled = true
-
 	if handled:
 		get_viewport().set_input_as_handled()
 
 
-func _toggle_fullscreen() -> void:
-	var mode := DisplayServer.window_get_mode()
-	if mode == DisplayServer.WINDOW_MODE_FULLSCREEN:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-	else:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
-
-
-func _append_logs(logs: Array[Dictionary]) -> void:
-	for item in logs:
-		log_history.append(item)
-		log_view.append_text(_format_log(item) + "\n")
-
-
-func _append_scripted_logs(logs: Array[Dictionary]) -> void:
-	for item in logs:
-		scripted_log_items.append(item)
-	if next_scripted_log_delay_seconds < 0.0 and not scripted_log_items.is_empty():
-		next_scripted_log_delay_seconds = randf_range(
-			Constants.LOG_DELAY_MIN_SECONDS, Constants.LOG_DELAY_MAX_SECONDS
-		)
-
-
-func _start_boot_sequence(boot_logs: Array[Dictionary]) -> void:
-	login_phase = LoginPhase.BOOT_STREAMING
-	scripted_log_items.clear()
-	next_scripted_log_delay_seconds = -1.0
-	_append_scripted_logs(boot_logs)
-
-
-func _on_login_confirmed() -> void:
-	if login_phase != LoginPhase.WAITING_LOGIN:
-		return
-	var login_logs := console.finish_boot_and_build_login_logs(game)
-	if login_logs.is_empty():
-		login_phase = LoginPhase.READY
-		return
-
-	var immediate_logs: Array[Dictionary] = [login_logs[0]]
-	_append_logs(immediate_logs)
-
-	if login_logs.size() == 1:
-		login_phase = LoginPhase.READY
-		return
-
-	var delayed_logs: Array[Dictionary] = []
-	for index in range(1, login_logs.size()):
-		delayed_logs.append(login_logs[index])
-	login_phase = LoginPhase.POST_LOGIN_STREAM
-	_append_scripted_logs(delayed_logs)
-
-
-func _drain_scripted_log_queue(delta: float) -> void:
-	if scripted_log_items.is_empty():
-		next_scripted_log_delay_seconds = -1.0
-		if login_phase == LoginPhase.BOOT_STREAMING:
-			login_phase = LoginPhase.WAITING_LOGIN
-		elif login_phase == LoginPhase.POST_LOGIN_STREAM:
-			login_phase = LoginPhase.READY
-		return
-
-	if next_scripted_log_delay_seconds < 0.0:
-		next_scripted_log_delay_seconds = randf_range(
-			Constants.LOG_DELAY_MIN_SECONDS, Constants.LOG_DELAY_MAX_SECONDS
-		)
-
-	next_scripted_log_delay_seconds -= delta
-	while next_scripted_log_delay_seconds <= 0.0 and not scripted_log_items.is_empty():
-		var item: Dictionary = scripted_log_items.pop_front()
-		_append_logs([item])
-		if scripted_log_items.is_empty():
-			next_scripted_log_delay_seconds = -1.0
-			if login_phase == LoginPhase.BOOT_STREAMING:
-				login_phase = LoginPhase.WAITING_LOGIN
-			elif login_phase == LoginPhase.POST_LOGIN_STREAM:
-				login_phase = LoginPhase.READY
-			return
-		next_scripted_log_delay_seconds += randf_range(
-			Constants.LOG_DELAY_MIN_SECONDS, Constants.LOG_DELAY_MAX_SECONDS
-		)
-
-
-func _rerender_log_history() -> void:
-	log_view.clear()
-	for item in log_history:
-		log_view.append_text(_format_log(item) + "\n")
-
-
-func _format_log(item: Dictionary) -> String:
-	var level: int = item.level
-	var event_key: String = item.event_key
-	var message := _resolve_log_message(item)
-	var event_label := TranslationServer.translate(event_key)
-	var color := _color_for_level(level)
-	if event_key == "TITLE":
-		return "[color=%s][b]%s[/b] %s[/color]" % [color, event_label, message]
-	return "[color=%s][%s] %s[/color]" % [color, event_label, message]
-
-
-func _resolve_log_message(item: Dictionary) -> String:
-	if item.has("message_key"):
-		var template := TranslationServer.translate(item["message_key"])
-		var resolved_args: Array = []
-		for arg in item["message_args"]:
-			resolved_args.append(_sanitize_log_arg(_resolve_log_arg(arg)))
-		if resolved_args.is_empty():
-			return _escape_bbcode(template)
-		return template % resolved_args
-	return _escape_bbcode(item["message"])
-
-
-func _resolve_log_arg(arg: Variant) -> Variant:
-	if arg is Dictionary:
-		var arg_dict: Dictionary = arg
-		if arg_dict.has("tr_key"):
-			return tr(arg_dict["tr_key"])
-		if arg_dict.has("join_tr_keys"):
-			var parts: Array[String] = []
-			for key in arg_dict["join_tr_keys"]:
-				parts.append(tr(key))
-			return ", ".join(parts)
-	return arg
-
-
-func _sanitize_log_arg(arg: Variant) -> Variant:
-	if arg is String:
-		return _escape_bbcode(arg)
-	return arg
-
-
-func _escape_bbcode(text: String) -> String:
-	return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
-
-
-func _color_for_level(level: int) -> String:
-	match level:
-		Console.LogLevel.NONE:
-			return Ui.TEXT.to_html(false)
-		Console.LogLevel.INFO:
-			return Ui.COLOR_BLUE.to_html(false)
-		Console.LogLevel.WARN:
-			return Ui.COLOR_YELLOW.to_html(false)
-		Console.LogLevel.CRIT:
-			return Ui.COLOR_RED.to_html(false)
-		Console.LogLevel.MAIL:
-			return Ui.COLOR_GREEN.to_html(false)
-		_:
-			return Ui.TEXT.to_html(false)
-
-
 func _refresh_status_values() -> void:
 	var snapshot := game.get_status_snapshot()
-	_set_status_value("STABILITY", snapshot.stability)
-	_set_status_value("BUDGET", snapshot.budget)
-	_set_status_value("ENTROPY", snapshot.entropy)
-	_set_status_value("KPI", snapshot.kpi)
+	_set_status_value("STABILITY", snapshot["stability"])
+	_set_status_value("BUDGET", snapshot["budget"])
+	_set_status_value("ENTROPY", snapshot["entropy"])
+	_set_status_value("KPI", snapshot["kpi"])
 
 
 func _set_status_value(key: String, value: float) -> void:
-	if not status_value_labels.has(key):
-		return
+	assert(status_value_labels.has(key))
 	var label: Label = status_value_labels[key]
 	label.text = "%.1f/100" % value

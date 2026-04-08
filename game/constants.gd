@@ -2,20 +2,19 @@ class_name Constants
 extends Node
 
 # Metadata
-const VERSION := "v0.1.0"
+const VERSION := "v0.2.0"
 const RANDOM_SEED := 271828
 
 # Core run configuration
 const TOTAL_ROUNDS := 3
 const ROUND_DURATION_SECONDS := 120
 const TICK_SECONDS := 1
-const KPI_TARGET := 100.0
-const MAX_AGENTS := 3
+const KPI_TARGET := 60.0
 const MAX_ACTIVE_INCIDENTS := 3
 
 # Initial state
 const INITIAL_ROUND_INDEX := 1
-const INITIAL_BUDGET := 100.0
+const INITIAL_BUDGET := 180.0
 const INITIAL_ENTROPY := 0.0
 const INITIAL_KPI := 0.0
 const INITIAL_STABILITY := 100.0
@@ -23,41 +22,78 @@ const INITIAL_MODEL_INTELLIGENCE := true
 const INITIAL_REVIEW_ID := 1
 const INITIAL_INCIDENT_ID := 1
 const INITIAL_AGENT_SUFFIX := 2
+const INITIAL_TASK_ID := 1
+const INITIAL_GOAL_ID := 1
 
-# Time drift
+# Goal and workflow policy
+const GOAL_STATUS_ACTIVE := "ACTIVE"
+const GOAL_STATUS_ACHIEVED := "ACHIEVED"
+const GOAL_STATUS_FAILED := "FAILED"
+const GOAL_STATUS_CANCELED := "CANCELED"
+const GOAL_PHASE_TASK_COUNT := 5
+const GOAL_PHASE_TASK_KEYS: Array[String] = [
+	"GOAL_PHASE_TASK_01",
+	"GOAL_PHASE_TASK_02",
+	"GOAL_PHASE_TASK_03",
+	"GOAL_PHASE_TASK_04",
+	"GOAL_PHASE_TASK_05",
+]
+
+const TASK_STATUS_QUEUED := "QUEUED"
+const TASK_STATUS_RUNNING := "RUNNING"
+const TASK_STATUS_WAITING_REVIEW := "WAITING_REVIEW"
+const TASK_STATUS_APPROVED := "APPROVED"
+const TASK_STATUS_REJECTED := "REJECTED"
+const TASK_STATUS_DONE := "DONE"
+const TASK_STATUS_CANCELED := "CANCELED"
+
+const REVIEW_STATUS_PENDING := "PENDING"
+const REVIEW_STATUS_APPROVED := "APPROVED"
+const REVIEW_STATUS_DENIED := "DENIED"
+const REVIEW_STATUS_CANCELED := "CANCELED"
+
+const REVIEW_DECISION_APPROVE := "APPROVE"
+const REVIEW_DECISION_DENY := "DENY"
+
+const WORKFLOW_STEP_PLAN := "PLAN"
+const WORKFLOW_STEP_TOOL_RUN := "TOOL_RUN"
+const WORKFLOW_STEP_REVIEW_GATE := "REVIEW_GATE"
+const WORKFLOW_STEP_APPLY := "APPLY"
+const WORKFLOW_STEPS: Array[String] = [
+	WORKFLOW_STEP_PLAN,
+	WORKFLOW_STEP_TOOL_RUN,
+	WORKFLOW_STEP_REVIEW_GATE,
+	WORKFLOW_STEP_APPLY,
+]
+const WORKFLOW_STEP_DURATION_MIN_TICKS := 1
+const WORKFLOW_STEP_DURATION_MAX_TICKS := 3
+
+# Economy and drift
 const STABILITY_DECAY_PER_TICK := 0.3
 const ENTROPY_GROWTH_PER_TICK := 0.5
+const AGENT_COST_PLANNER := 0.4
+const AGENT_COST_GENERATOR := 1.0
+const AGENT_COST_EVALUATOR := 0.4
 
-# Economy
-const AGENT_COST_PLANNER := 0.6
-const AGENT_COST_GENERATOR := 1.4
-const AGENT_COST_EVALUATOR := 0.6
-const BUDGET_OPTIMIZATION_COST_MULTIPLIER := 0.7
+# Role effects
+const PLANNER_APPLY_ENTROPY_REDUCTION := 2.0
+const GENERATOR_APPLY_KPI_GAIN_WITH_PLAN := 12.0
+const GENERATOR_APPLY_KPI_GAIN_SELF_PLAN := 9.0
+const GENERATOR_SELF_PLAN_STABILITY_PENALTY := 2.0
+const EVALUATOR_APPLY_STABILITY_GAIN := 1.5
 
-# Planner
-const PLANNER_ENTROPY_REDUCTION_PER_TICK := 0.6
+# Review behavior
+const EVALUATOR_AUTO_REVIEW_CHANCE := 0.7
+const EVALUATOR_AUTO_REVIEW_ERROR_RATE := 0.15
 
-# Review
-const REVIEW_GENERATE_CHANCE := 0.8
-const REVIEW_APPROVE_GOOD_KPI_GAIN := 10.0
-const REVIEW_APPROVE_BAD_STABILITY_LOSS := 15.0
-const REVIEW_DENY_GOOD_STABILITY_LOSS := 5.0
-const EVALUATOR_AUTO_APPROVE_CHANCE := 0.5
-const EVALUATOR_AUTO_REVIEW_ERROR_RATE_OK := 0.1
-const EVALUATOR_AUTO_REVIEW_ERROR_RATE_UNSTABLE := 0.8
-const EVALUATOR_AUTO_REVIEW_ERROR_RATE_DRIFTING := 0.5
-const BAD_REVIEW_PROBABILITY_SMART := 0.20
-const BAD_REVIEW_PROBABILITY_NOT_SMART := 0.45
-
-# Incident
+# Incident behavior
 const INCIDENT_BASE_CHANCE := 0.03
 const INCIDENT_CHANCE_BONUS_AT_100_ENTROPY := 0.07
 const INCIDENT_GRACE_SECONDS := 15
-const SYSTEM_NOISE_PROB_PER_ONLINE_AGENT := 0.1
-const RETRY_STORM_NOISE_PROB_BONUS := 0.4
-const RETRY_STORM_ENTROPY_GAIN := 3.0
 const INCIDENT_TARGET_ENTROPY_GAIN := 3.0
 const INCIDENT_CREATE_ENTROPY_GAIN := 2.0
+const INCIDENT_PATCH_RECOVER_STABILITY := 4.0
+const INCIDENT_PATCH_DURATION_TICKS := 4
 
 # Round identity and seeded entities
 const USER_KEYS_BY_ROUND: Array[String] = ["USER1", "USER2", "USER3"]
@@ -67,49 +103,35 @@ const INITIAL_AGENT_SEEDS := [
 	{"id": "generator-1", "type": "GENERATOR"},
 	{"id": "evaluator-1", "type": "EVALUATOR"},
 ]
-const AGENT_TYPES: Array[String] = [
-	"PLANNER",
-	"GENERATOR",
-	"EVALUATOR",
-]
+const AGENT_TYPES: Array[String] = ["PLANNER", "GENERATOR", "EVALUATOR"]
+
 const INCIDENT_TYPES: Array[String] = [
-	"RETRY_STORM",
 	"PROMPT_DRIFT",
 	"MEMORY_CONTAMINATION",
 	"BUDGET_OPTIMIZATION",
 	"PRODUCTION_CREATIVITY",
 ]
+
 const INCIDENT_TYPE_TO_AGENT := {
 	"PROMPT_DRIFT": "PLANNER",
 	"PRODUCTION_CREATIVITY": "GENERATOR",
 	"MEMORY_CONTAMINATION": "EVALUATOR",
+	"BUDGET_OPTIMIZATION": "GENERATOR",
 }
 
-# Console command and boot output
-const CONSOLE_COMMANDS := [
-	"agents",
-	"approve <agent>",
-	"deny <agent>",
-	"help",
-	"incidents",
-	"inspect <target>",
-	"kill <agent>",
-	"mute <agent>",
-	"patch <incident>",
-	"run <planner|generator|evaluator>",
-	"status",
-	"trust <agent>",
-]
-const CONSOLE_COMMANDS_REQUIRE_TARGET := [
-	"approve",
-	"deny",
-	"inspect",
-	"kill",
-	"mute",
-	"patch",
-	"run",
-	"trust",
-]
+const INCIDENT_TYPE_PATCHABLE := {
+	"PROMPT_DRIFT": true,
+	"PRODUCTION_CREATIVITY": true,
+	"MEMORY_CONTAMINATION": true,
+	"BUDGET_OPTIMIZATION": false,
+}
+
+# Deterministic tool catalog
+const ROLE_TOOLS := {
+	"PLANNER": ["queue_router", "plan_sync"],
+	"GENERATOR": ["draft_builder", "variant_sampler"],
+	"EVALUATOR": ["risk_scan", "policy_check"],
+}
 
 # End-of-run categorization
 const CONSOLE_FINAL_BUCKET_DOMINANT_THRESHOLD := 2
@@ -125,3 +147,5 @@ const CONSOLE_FINAL_BUCKET_REORG := "REORG"
 # Log pacing
 const LOG_DELAY_MIN_SECONDS := 0.5
 const LOG_DELAY_MAX_SECONDS := 1.0
+const RUNTIME_TASK_LOG_DELAY_MIN_SECONDS := 2.0
+const RUNTIME_TASK_LOG_DELAY_MAX_SECONDS := 3.5

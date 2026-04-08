@@ -8,6 +8,7 @@ var _keys_by_prefix: Dictionary = {}
 
 func _init() -> void:
 	_load_transcript_index()
+	assert(not _keys_by_prefix.is_empty())
 
 
 func resolve_structured_key(
@@ -17,7 +18,8 @@ func resolve_structured_key(
 	for key in candidates:
 		if _key_exists(key):
 			return key
-	return candidates[0]
+	assert(false, "Missing structured key: %s" % candidates[0])
+	return ""
 
 
 func pick_structured_key(
@@ -27,7 +29,10 @@ func pick_structured_key(
 		var keys: Array[String] = _keys_for_prefix(prefix)
 		if not keys.is_empty():
 			return keys.pick_random()
-	return "%s__00" % _candidate_prefixes(phase, speaker, round_key, outcome, kind)[0]
+	assert(
+		false, "Missing structured variant: %s" % _prefix(phase, speaker, round_key, outcome, kind)
+	)
+	return ""
 
 
 func pick_structured_message(
@@ -62,7 +67,11 @@ func list_structured_keys(
 		var keys: Array[String] = _keys_for_prefix(prefix)
 		if not keys.is_empty():
 			return keys
-	return ["%s__00" % _candidate_prefixes(phase, speaker, round_key, outcome, kind)[0]]
+	assert(
+		false,
+		"Missing structured key family: %s" % _prefix(phase, speaker, round_key, outcome, kind)
+	)
+	return []
 
 
 func has_structured_variant(
@@ -77,15 +86,14 @@ func has_structured_variant(
 func _load_transcript_index() -> void:
 	_keys_by_prefix.clear()
 	var file := FileAccess.open(TRANSCRIPTS_PATH, FileAccess.READ)
-	if file == null:
-		return
+	assert(file != null)
 
 	var is_header := true
 	while not file.eof_reached():
 		var row := file.get_csv_line()
 		if row.is_empty():
 			continue
-		var raw_key := str(row[0]).strip_edges()
+		var raw_key := row[0].strip_edges()
 		if raw_key.is_empty():
 			continue
 		if is_header:
@@ -99,16 +107,7 @@ func _register_key(key: String) -> void:
 	var parts := key.split("__", false)
 	if parts.size() != 6:
 		return
-	var prefix := (
-		"%s__%s__%s__%s__%s"
-		% [
-			parts[0],
-			parts[1],
-			parts[2],
-			parts[3],
-			parts[4],
-		]
-	)
+	var prefix := "%s__%s__%s__%s__%s" % [parts[0], parts[1], parts[2], parts[3], parts[4]]
 	if not _keys_by_prefix.has(prefix):
 		_keys_by_prefix[prefix] = []
 	var keys: Array = _keys_by_prefix[prefix]
@@ -120,6 +119,7 @@ func _register_key(key: String) -> void:
 func _candidate_keys(
 	phase: String, speaker: String, round_key: String, outcome: String, kind: String, index: String
 ) -> Array[String]:
+	assert(not index.is_empty())
 	var keys: Array[String] = []
 	for prefix in _candidate_prefixes(phase, speaker, round_key, outcome, kind):
 		keys.append("%s__%s" % [prefix, index])
@@ -129,6 +129,11 @@ func _candidate_keys(
 func _candidate_prefixes(
 	phase: String, speaker: String, round_key: String, outcome: String, kind: String
 ) -> Array[String]:
+	assert(not phase.is_empty())
+	assert(not speaker.is_empty())
+	assert(not round_key.is_empty())
+	assert(not outcome.is_empty())
+	assert(not kind.is_empty())
 	return [
 		_prefix(phase, speaker, round_key, outcome, kind),
 		_prefix(phase, speaker, round_key, "ANY", kind),
@@ -140,20 +145,25 @@ func _candidate_prefixes(
 func _prefix(
 	phase: String, speaker: String, round_key: String, outcome: String, kind: String
 ) -> String:
+	assert(not phase.is_empty())
+	assert(not speaker.is_empty())
+	assert(not round_key.is_empty())
+	assert(not outcome.is_empty())
+	assert(not kind.is_empty())
 	return "%s__%s__%s__%s__%s" % [phase, speaker, round_key, outcome, kind]
 
 
 func _keys_for_prefix(prefix: String) -> Array[String]:
+	assert(not prefix.is_empty())
 	if not _keys_by_prefix.has(prefix):
 		return []
 	var keys: Array[String] = []
 	for key in _keys_by_prefix[prefix]:
-		keys.append(str(key))
+		keys.append(key)
 	return keys
 
 
 func _key_exists(key: String) -> bool:
 	var parts := key.rsplit("__", false, 1)
-	if parts.size() != 2:
-		return false
+	assert(parts.size() == 2)
 	return _keys_by_prefix.has(parts[0]) and key in _keys_by_prefix[parts[0]]
