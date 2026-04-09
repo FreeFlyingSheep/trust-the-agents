@@ -20,10 +20,8 @@ const COLOR_STATUS_BUDGET := Color("#60a5fa")
 const COLOR_STATUS_ENTROPY := Color("#c084fc")
 const COLOR_STATUS_KPI := Color("#f59e0b")
 
-const FONT_REGULAR := preload("res://ui/font-mono.ttf")
-const FONT_BOLD := preload("res://ui/font-bold.ttf")
-const FONT_ITALIC := preload("res://ui/font-italic.ttf")
-const FONT_BOLD_ITALIC := preload("res://ui/font-bold-italic.ttf")
+const FONT_REGULAR := preload("res://ui/font-mono.otf")
+const FONT_BOLD := preload("res://ui/font-bold.otf")
 const FONT_SCALE := 1.15
 
 
@@ -290,8 +288,8 @@ func _build_mail_panel() -> Dictionary:
 	mail_detail_view.fit_content = false
 	mail_detail_view.add_theme_font_override("normal_font", FONT_REGULAR)
 	mail_detail_view.add_theme_font_override("bold_font", FONT_BOLD)
-	mail_detail_view.add_theme_font_override("italics_font", FONT_ITALIC)
-	mail_detail_view.add_theme_font_override("bold_italics_font", FONT_BOLD_ITALIC)
+	mail_detail_view.add_theme_font_override("italics_font", FONT_REGULAR)
+	mail_detail_view.add_theme_font_override("bold_italics_font", FONT_BOLD)
 	mail_detail_view.add_theme_font_size_override("normal_font_size", scaled_font_size(14))
 	content.add_child(mail_detail_view)
 
@@ -319,8 +317,8 @@ func _build_log_panel() -> Dictionary:
 	log_view.fit_content = false
 	log_view.add_theme_font_override("normal_font", FONT_REGULAR)
 	log_view.add_theme_font_override("bold_font", FONT_BOLD)
-	log_view.add_theme_font_override("italics_font", FONT_ITALIC)
-	log_view.add_theme_font_override("bold_italics_font", FONT_BOLD_ITALIC)
+	log_view.add_theme_font_override("italics_font", FONT_REGULAR)
+	log_view.add_theme_font_override("bold_italics_font", FONT_BOLD)
 	log_view.add_theme_font_size_override("normal_font_size", scaled_font_size(15))
 	content.add_child(log_view)
 

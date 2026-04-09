@@ -31,5 +31,5 @@ It prints the ending distribution summary directly in the terminal.
 ## Credits｜致谢
 
 - Built with Godot | 基于 Godot 开发
-- Typeface: JetBrains Mono | 字体：JetBrains Mono
+- Typeface: Source Han Mono | 字体：思源等宽
 - Development support: Codex | 开发支持：Codex
