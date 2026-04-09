@@ -4,7 +4,10 @@ enum LoginPhase { WAITING_LOGIN, READY }
 
 var ui_root: Control
 var title_label: Label
-var hotkey_hint_label: Label
+var language_button: Button
+var fullscreen_button: Button
+var left_indent_button: Button
+var right_indent_button: Button
 var time_label: Label
 var round_label: Label
 var status_title_label: Label
@@ -75,7 +78,10 @@ func _build_ui() -> void:
 	var ui := Ui.new().build(self, "", console.status_items(game))
 	ui_root = ui["ui_root"]
 	title_label = ui["title_label"]
-	hotkey_hint_label = ui["hotkey_hint_label"]
+	language_button = ui["language_button"]
+	fullscreen_button = ui["fullscreen_button"]
+	left_indent_button = ui["left_indent_button"]
+	right_indent_button = ui["right_indent_button"]
 	time_label = ui["time_label"]
 	round_label = ui["round_label"]
 	status_title_label = ui["status_title_label"]
@@ -97,7 +103,11 @@ func _build_ui() -> void:
 
 func _wire_action_handlers() -> void:
 	assert(mail_list != null)
+	assert(language_button != null)
+	assert(fullscreen_button != null)
 	mail_list.item_selected.connect(_on_mail_selected)
+	language_button.pressed.connect(_on_language_button_pressed)
+	fullscreen_button.pressed.connect(_on_fullscreen_button_pressed)
 
 
 func _emit_events(events: Array[Dictionary]) -> void:
@@ -392,7 +402,10 @@ func _on_mail_selected(index: int) -> void:
 
 func _refresh_locale_ui() -> void:
 	title_label.text = tr("TITLE")
-	hotkey_hint_label.text = tr("HOTKEY_HINT")
+	language_button.text = tr("LANGUAGE_BUTTON")
+	fullscreen_button.text = tr("FULLSCREEN_BUTTON")
+	left_indent_button.text = tr("LEFT_INDENT_BUTTON")
+	right_indent_button.text = tr("RIGHT_INDENT_BUTTON")
 	status_title_label.text = tr("STATUS")
 	agents_title_label.text = tr("AGENTS")
 	reviews_title_label.text = tr("REVIEWS")
@@ -603,20 +616,12 @@ func _toggle_fullscreen() -> void:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 
 
-func _input(event: InputEvent) -> void:
-	var handled := false
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_ESCAPE:
-			get_tree().quit()
-			handled = true
-		elif event.keycode == KEY_F1:
-			_toggle_language()
-			handled = true
-		elif event.keycode == KEY_F2:
-			_toggle_fullscreen()
-			handled = true
-	if handled:
-		get_viewport().set_input_as_handled()
+func _on_language_button_pressed() -> void:
+	_toggle_language()
+
+
+func _on_fullscreen_button_pressed() -> void:
+	_toggle_fullscreen()
 
 
 func _refresh_status_values() -> void:

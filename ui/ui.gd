@@ -22,12 +22,9 @@ const COLOR_STATUS_KPI := Color("#f59e0b")
 
 const FONT_REGULAR := preload("res://ui/font-mono.otf")
 const FONT_BOLD := preload("res://ui/font-bold.otf")
-const FONT_SCALE := 1.15
 
-
-static func scaled_font_size(base_size: int) -> int:
-	assert(base_size >= 1)
-	return maxi(1, int(round(float(base_size) * FONT_SCALE)))
+const MAIN_MARGIN_BASE := 20
+const FIXED_INDENT := 200
 
 
 func build(root: Node, time_left_text: String, status_items: Array) -> Dictionary:
@@ -43,12 +40,31 @@ func build(root: Node, time_left_text: String, status_items: Array) -> Dictionar
 	bg.color = BG
 	ui_root.add_child(bg)
 
+	var left_edge := ColorRect.new()
+	left_edge.anchor_top = 0.0
+	left_edge.anchor_bottom = 1.0
+	left_edge.anchor_left = 0.0
+	left_edge.anchor_right = 0.0
+	left_edge.offset_left = 0.0
+	left_edge.offset_right = 2.0
+	left_edge.color = BORDER
+	ui_root.add_child(left_edge)
+
+	var right_edge := ColorRect.new()
+	right_edge.anchor_top = 0.0
+	right_edge.anchor_bottom = 1.0
+	right_edge.anchor_left = 1.0
+	right_edge.anchor_right = 1.0
+	right_edge.offset_left = -2.0
+	right_edge.offset_right = 0.0
+	right_edge.color = BORDER
+	ui_root.add_child(right_edge)
+
 	var main_margin := MarginContainer.new()
 	main_margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	main_margin.add_theme_constant_override("margin_left", 20)
-	main_margin.add_theme_constant_override("margin_top", 20)
-	main_margin.add_theme_constant_override("margin_right", 20)
-	main_margin.add_theme_constant_override("margin_bottom", 20)
+	var margin_extra := {"left": 0, "right": 0}
+	var is_landscape := _is_landscape()
+	_apply_main_margins(main_margin, margin_extra, is_landscape)
 	ui_root.add_child(main_margin)
 
 	var root_vbox := VBoxContainer.new()
@@ -58,6 +74,34 @@ func build(root: Node, time_left_text: String, status_items: Array) -> Dictionar
 	main_margin.add_child(root_vbox)
 
 	var top_bar: Dictionary = _build_top_bar(time_left_text)
+	var margin_button_container: Control = top_bar["margin_button_container"]
+	var left_indent_button: Button = top_bar["left_indent_button"]
+	var right_indent_button: Button = top_bar["right_indent_button"]
+	margin_button_container.visible = is_landscape
+	left_indent_button.pressed.connect(
+		func() -> void:
+			margin_extra["left"] = (
+				0 if int(margin_extra.get("left", 0)) == FIXED_INDENT else FIXED_INDENT
+			)
+			_apply_main_margins(main_margin, margin_extra, _is_landscape())
+	)
+	right_indent_button.pressed.connect(
+		func() -> void:
+			margin_extra["right"] = (
+				0 if int(margin_extra.get("right", 0)) == FIXED_INDENT else FIXED_INDENT
+			)
+			_apply_main_margins(main_margin, margin_extra, _is_landscape())
+	)
+
+	var viewport := root.get_viewport()
+	if viewport != null:
+		viewport.size_changed.connect(
+			func() -> void:
+				var landscape_now := _is_landscape()
+				margin_button_container.visible = landscape_now
+				_apply_main_margins(main_margin, margin_extra, landscape_now)
+		)
+
 	root_vbox.add_child(top_bar["panel"])
 
 	var workspace: Dictionary = _build_workspace(status_items)
@@ -69,7 +113,10 @@ func build(root: Node, time_left_text: String, status_items: Array) -> Dictionar
 	return {
 		"ui_root": ui_root,
 		"title_label": top_bar["title_label"],
-		"hotkey_hint_label": top_bar["hotkey_hint_label"],
+		"language_button": top_bar["language_button"],
+		"fullscreen_button": top_bar["fullscreen_button"],
+		"left_indent_button": top_bar["left_indent_button"],
+		"right_indent_button": top_bar["right_indent_button"],
 		"time_label": top_bar["time_label"],
 		"round_label": top_bar["round_label"],
 		"status_title_label": workspace["status_title_label"],
@@ -90,7 +137,6 @@ func build(root: Node, time_left_text: String, status_items: Array) -> Dictionar
 func _build_top_bar(time_left_text: String) -> Dictionary:
 	var panel := PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.custom_minimum_size = Vector2(0, 76)
 	panel.add_theme_stylebox_override("panel", _stylebox(PANEL_DARK, BORDER, 2, 8))
 
 	var margin := MarginContainer.new()
@@ -114,16 +160,15 @@ func _build_top_bar(time_left_text: String) -> Dictionary:
 	title_label.text = tr("TITLE")
 	_apply_font(title_label, FONT_BOLD)
 	title_label.add_theme_color_override("font_color", TITLE)
-	title_label.add_theme_font_size_override("font_size", scaled_font_size(28))
+	title_label.add_theme_font_size_override("font_size", 28)
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	left_group.add_child(title_label)
 
-	var hotkey_hint_label := Label.new()
-	hotkey_hint_label.text = tr("HOTKEY_HINT")
-	_apply_font(hotkey_hint_label)
-	hotkey_hint_label.add_theme_color_override("font_color", TEXT_DIM)
-	hotkey_hint_label.add_theme_font_size_override("font_size", scaled_font_size(16))
-	left_group.add_child(hotkey_hint_label)
+	var language_button := _top_bar_button(tr("LANGUAGE_BUTTON"))
+	left_group.add_child(language_button)
+
+	var fullscreen_button := _top_bar_button(tr("FULLSCREEN_BUTTON"))
+	left_group.add_child(fullscreen_button)
 
 	var time_center := CenterContainer.new()
 	time_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -133,25 +178,40 @@ func _build_top_bar(time_left_text: String) -> Dictionary:
 	time_label.text = time_left_text
 	_apply_font(time_label, FONT_BOLD)
 	time_label.add_theme_color_override("font_color", TEXT)
-	time_label.add_theme_font_size_override("font_size", scaled_font_size(26))
+	time_label.add_theme_font_size_override("font_size", 26)
 	time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	time_center.add_child(time_label)
+
+	var margin_button_container := HBoxContainer.new()
+	margin_button_container.custom_minimum_size = Vector2(132, 0)
+	margin_button_container.add_theme_constant_override("separation", 6)
+	hbox.add_child(margin_button_container)
+
+	var left_indent_button := _top_bar_button(tr("LEFT_INDENT_BUTTON"))
+	margin_button_container.add_child(left_indent_button)
+
+	var right_indent_button := _top_bar_button(tr("RIGHT_INDENT_BUTTON"))
+	margin_button_container.add_child(right_indent_button)
 
 	var round_label := Label.new()
 	round_label.text = ""
 	_apply_font(round_label, FONT_BOLD)
 	round_label.add_theme_color_override("font_color", TEXT_DIM)
-	round_label.add_theme_font_size_override("font_size", scaled_font_size(24))
-	round_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	round_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	round_label.add_theme_font_size_override("font_size", 24)
+	round_label.size_flags_horizontal = Control.SIZE_SHRINK_END
+	round_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	hbox.add_child(round_label)
 
 	return {
 		"panel": panel,
 		"title_label": title_label,
-		"hotkey_hint_label": hotkey_hint_label,
+		"language_button": language_button,
+		"fullscreen_button": fullscreen_button,
 		"time_label": time_label,
 		"round_label": round_label,
+		"margin_button_container": margin_button_container,
+		"left_indent_button": left_indent_button,
+		"right_indent_button": right_indent_button,
 	}
 
 
@@ -162,25 +222,28 @@ func _build_workspace(status_items: Array) -> Dictionary:
 	workspace.add_theme_constant_override("separation", 12)
 
 	var left_column := VBoxContainer.new()
+	left_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left_column.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	left_column.custom_minimum_size = Vector2(460, 0)
+	left_column.size_flags_stretch_ratio = 1.0
 	left_column.add_theme_constant_override("separation", 12)
 	workspace.add_child(left_column)
 
 	var status_panel: Dictionary = _build_status_panel(status_items)
 	var status_widget: Control = status_panel["panel"]
-	status_widget.custom_minimum_size = Vector2(0, 210)
+	status_widget.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	status_widget.size_flags_stretch_ratio = 0.8
 	left_column.add_child(status_widget)
 
 	var mail_panel: Dictionary = _build_mail_panel()
 	var mail_widget: Control = mail_panel["panel"]
 	mail_widget.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	mail_widget.size_flags_stretch_ratio = 1.2
 	left_column.add_child(mail_widget)
 
 	var center_column := VBoxContainer.new()
 	center_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	center_column.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	center_column.custom_minimum_size = Vector2(520, 0)
+	center_column.size_flags_stretch_ratio = 1.15
 	center_column.add_theme_constant_override("separation", 12)
 	workspace.add_child(center_column)
 
@@ -188,28 +251,33 @@ func _build_workspace(status_items: Array) -> Dictionary:
 	var agents_widget: Control = agents_panel["panel"]
 	agents_widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	agents_widget.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	agents_widget.size_flags_stretch_ratio = 1.2
 	center_column.add_child(agents_widget)
 
 	var log_panel: Dictionary = _build_log_panel()
 	var log_widget: Control = log_panel["panel"]
-	log_widget.custom_minimum_size = Vector2(0, 240)
 	log_widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	log_widget.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	log_widget.size_flags_stretch_ratio = 0.8
 	center_column.add_child(log_widget)
 
 	var right_column := VBoxContainer.new()
+	right_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right_column.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right_column.custom_minimum_size = Vector2(460, 0)
+	right_column.size_flags_stretch_ratio = 1.0
 	right_column.add_theme_constant_override("separation", 12)
 	workspace.add_child(right_column)
 
 	var task_panel: Dictionary = _build_task_panel()
 	var task_widget: Control = task_panel["panel"]
-	task_widget.custom_minimum_size = Vector2(0, 400)
+	task_widget.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	task_widget.size_flags_stretch_ratio = 1.1
 	right_column.add_child(task_widget)
 
 	var review_panel: Dictionary = _build_review_panel()
 	var review_widget: Control = review_panel["panel"]
 	review_widget.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	review_widget.size_flags_stretch_ratio = 0.9
 	right_column.add_child(review_widget)
 
 	return {
@@ -269,11 +337,12 @@ func _build_mail_panel() -> Dictionary:
 	var title_label := panel.get_meta("title_label") as Label
 	var mail_list := ItemList.new()
 	mail_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mail_list.custom_minimum_size = Vector2(0, 170)
+	mail_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	mail_list.size_flags_stretch_ratio = 0.9
 	mail_list.select_mode = ItemList.SELECT_SINGLE
 	mail_list.allow_reselect = true
 	mail_list.add_theme_font_override("font", FONT_REGULAR)
-	mail_list.add_theme_font_size_override("font_size", scaled_font_size(14))
+	mail_list.add_theme_font_size_override("font_size", 14)
 	content.add_child(mail_list)
 
 	content.add_child(HSeparator.new())
@@ -290,7 +359,8 @@ func _build_mail_panel() -> Dictionary:
 	mail_detail_view.add_theme_font_override("bold_font", FONT_BOLD)
 	mail_detail_view.add_theme_font_override("italics_font", FONT_REGULAR)
 	mail_detail_view.add_theme_font_override("bold_italics_font", FONT_BOLD)
-	mail_detail_view.add_theme_font_size_override("normal_font_size", scaled_font_size(14))
+	mail_detail_view.add_theme_font_size_override("normal_font_size", 14)
+	mail_detail_view.size_flags_stretch_ratio = 1.1
 	content.add_child(mail_detail_view)
 
 	return {
@@ -319,7 +389,7 @@ func _build_log_panel() -> Dictionary:
 	log_view.add_theme_font_override("bold_font", FONT_BOLD)
 	log_view.add_theme_font_override("italics_font", FONT_REGULAR)
 	log_view.add_theme_font_override("bold_italics_font", FONT_BOLD)
-	log_view.add_theme_font_size_override("normal_font_size", scaled_font_size(15))
+	log_view.add_theme_font_size_override("normal_font_size", 15)
 	content.add_child(log_view)
 
 	return {
@@ -421,14 +491,14 @@ func _metric_tile(item_name: String, value: float, color: Color) -> Dictionary:
 	name_label.text = item_name
 	_apply_font(name_label, FONT_BOLD)
 	name_label.add_theme_color_override("font_color", color)
-	name_label.add_theme_font_size_override("font_size", scaled_font_size(14))
+	name_label.add_theme_font_size_override("font_size", 14)
 	vbox.add_child(name_label)
 
 	var value_label := Label.new()
 	value_label.text = "%.1f/100" % value
 	_apply_font(value_label)
 	value_label.add_theme_color_override("font_color", TITLE)
-	value_label.add_theme_font_size_override("font_size", scaled_font_size(15))
+	value_label.add_theme_font_size_override("font_size", 15)
 	vbox.add_child(value_label)
 
 	return {"tile": tile, "name_label": name_label, "value_label": value_label}
@@ -440,7 +510,7 @@ func _section_header(text: String) -> Label:
 	label.text = text
 	_apply_font(label, FONT_BOLD)
 	label.add_theme_color_override("font_color", COLOR_BLUE)
-	label.add_theme_font_size_override("font_size", scaled_font_size(16))
+	label.add_theme_font_size_override("font_size", 16)
 	return label
 
 
@@ -451,7 +521,7 @@ func _info_label(text: String) -> Label:
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_apply_font(label)
 	label.add_theme_color_override("font_color", TEXT_DIM)
-	label.add_theme_font_size_override("font_size", scaled_font_size(14))
+	label.add_theme_font_size_override("font_size", 14)
 	return label
 
 
@@ -477,7 +547,7 @@ func _panel_with_title(title_text: String) -> PanelContainer:
 	title.text = title_text
 	_apply_font(title, FONT_BOLD)
 	title.add_theme_color_override("font_color", TITLE)
-	title.add_theme_font_size_override("font_size", scaled_font_size(22))
+	title.add_theme_font_size_override("font_size", 22)
 	vbox.add_child(title)
 
 	var sep := HSeparator.new()
@@ -508,3 +578,39 @@ func _stylebox(bg: Color, border: Color, border_width: int, radius: int) -> Styl
 func _apply_font(control: Control, font: Font = FONT_REGULAR) -> void:
 	assert(control != null)
 	control.add_theme_font_override("font", font)
+
+
+func _is_landscape() -> bool:
+	var size := DisplayServer.window_get_size()
+	return size.x >= size.y
+
+
+func _apply_main_margins(
+	main_margin: MarginContainer, margin_extra: Dictionary, include_extra: bool
+) -> void:
+	var left_extra := 0
+	var right_extra := 0
+	if include_extra:
+		left_extra = int(margin_extra.get("left", 0))
+		right_extra = int(margin_extra.get("right", 0))
+	main_margin.add_theme_constant_override("margin_left", MAIN_MARGIN_BASE + left_extra)
+	main_margin.add_theme_constant_override("margin_top", MAIN_MARGIN_BASE)
+	main_margin.add_theme_constant_override("margin_right", MAIN_MARGIN_BASE + right_extra)
+	main_margin.add_theme_constant_override("margin_bottom", MAIN_MARGIN_BASE)
+
+
+func _top_bar_button(text: String) -> Button:
+	assert(not text.is_empty())
+	var button := Button.new()
+	button.text = text
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = Vector2(160, 34)
+	button.add_theme_font_override("font", FONT_BOLD)
+	button.add_theme_font_size_override("font_size", 14)
+	button.add_theme_stylebox_override("normal", _stylebox(PANEL, BORDER, 1, 6))
+	button.add_theme_stylebox_override("hover", _stylebox(PANEL_DARK, COLOR_BLUE, 1, 6))
+	button.add_theme_stylebox_override("pressed", _stylebox(PANEL_DARK, COLOR_STATUS_BUDGET, 1, 6))
+	button.add_theme_color_override("font_color", TEXT_DIM)
+	button.add_theme_color_override("font_hover_color", TITLE)
+	button.add_theme_color_override("font_pressed_color", TITLE)
+	return button
