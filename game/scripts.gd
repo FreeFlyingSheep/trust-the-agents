@@ -41,7 +41,6 @@ func _logger_boot_logs_without_mail_channel() -> Array[Dictionary]:
 
 
 func finish_boot_and_build_login_logs(game: Game) -> Array[Dictionary]:
-	game.finish_boot()
 	var login_logs: Array[Dictionary] = []
 	login_logs.append_array(_post_login_boot_logs(game))
 	return login_logs
@@ -76,9 +75,11 @@ func build_final_summary_logs(game: Game) -> Array[Dictionary]:
 
 func _post_login_boot_logs(game: Game) -> Array[Dictionary]:
 	var logs: Array[Dictionary] = []
-	logs.append_array(
-		_sequential_structured_logs(
-			Console.LogLevel.INFO, "BOSS", "BOOTING", "BOSS", "R1", "ANY", "KPI"
+	logs.append(
+		_log(
+			Console.LogLevel.INFO,
+			"BOSS",
+			copybook.pick_structured_message("BOOTING", "BOSS", "R1", "ANY", "KPI")
 		)
 	)
 	var previous_user: String = game.previous_user_key()
@@ -86,10 +87,15 @@ func _post_login_boot_logs(game: Game) -> Array[Dictionary]:
 	var outcome_key: String = ending_rules.round_outcome_key(game.last_outcome)
 	if outcome_key.is_empty():
 		outcome_key = "ANY"
-	for message in copybook.list_structured_messages(
-		"HANDOFF", previous_user, round_key, outcome_key, "CORE"
-	):
-		logs.append(_log(Console.LogLevel.INFO, previous_user, message))
+	logs.append(
+		_log(
+			Console.LogLevel.INFO,
+			previous_user,
+			copybook.pick_structured_message(
+				"HANDOFF", previous_user, round_key, outcome_key, "CORE"
+			)
+		)
+	)
 	return logs
 
 

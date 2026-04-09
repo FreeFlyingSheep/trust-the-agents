@@ -139,6 +139,11 @@ func _resolve_review_ticket(
 	var ticket: Dictionary = game.review_tickets[ticket_id]
 	assert(ticket["status"] == Constants.REVIEW_STATUS_PENDING)
 	assert(game.tasks.has(ticket["task_id"]))
+	assert(ticket.has("content_quality"))
+	assert(
+		ticket["content_quality"] in [Constants.REVIEW_CONTENT_GOOD, Constants.REVIEW_CONTENT_BAD]
+	)
+	var content_quality: String = ticket["content_quality"]
 
 	ticket["status"] = (
 		Constants.REVIEW_STATUS_APPROVED if approved else Constants.REVIEW_STATUS_DENIED
@@ -150,6 +155,7 @@ func _resolve_review_ticket(
 
 	var task: Dictionary = game.tasks[ticket["task_id"]]
 	assert(task["status"] == Constants.TASK_STATUS_WAITING_REVIEW)
+	task["review_ticket_id"] = ""
 	if approved:
 		task["status"] = Constants.TASK_STATUS_APPROVED
 		task["current_step"] += 1
@@ -160,6 +166,21 @@ func _resolve_review_ticket(
 		task["status"] = Constants.TASK_STATUS_REJECTED
 		_remove_task_from_queue(game, task["agent_id"], task["id"])
 	game.tasks[task["id"]] = task
+
+	if approved and content_quality == Constants.REVIEW_CONTENT_GOOD:
+		game.kpi += Constants.REVIEW_EFFECT_APPROVE_GOOD_KPI_DELTA
+	elif approved and content_quality == Constants.REVIEW_CONTENT_BAD:
+		game.stability = maxf(
+			0.0, game.stability + Constants.REVIEW_EFFECT_APPROVE_BAD_STABILITY_DELTA
+		)
+	elif (not approved) and content_quality == Constants.REVIEW_CONTENT_BAD:
+		game.stability = minf(
+			100.0, game.stability + Constants.REVIEW_EFFECT_DENY_BAD_STABILITY_DELTA
+		)
+	else:
+		assert((not approved) and content_quality == Constants.REVIEW_CONTENT_GOOD)
+		game.entropy += Constants.REVIEW_EFFECT_DENY_GOOD_ENTROPY_DELTA
+
 	_sync_pending_review_for_agent(game, task["agent_id"])
 
 	return {
@@ -170,6 +191,7 @@ func _resolve_review_ticket(
 		"actor": actor_agent_id,
 		"actor_type": actor_type,
 		"approved": approved,
+		"content_quality": content_quality,
 	}
 
 
@@ -181,6 +203,10 @@ func _cancel_review_ticket(game, ticket_id: String, reason: String) -> void:
 	ticket["status"] = Constants.REVIEW_STATUS_CANCELED
 	ticket["decision"] = reason
 	game.review_tickets[ticket_id] = ticket
+	if game.tasks.has(ticket["task_id"]):
+		var task: Dictionary = game.tasks[ticket["task_id"]]
+		task["review_ticket_id"] = ""
+		game.tasks[task["id"]] = task
 	_sync_pending_review_for_agent(game, ticket["requester_agent_id"])
 
 
@@ -247,6 +273,7 @@ func _create_incident(game, agent_id: String, incident_type: String) -> Dictiona
 	game.next_incident_id += 1
 	game.active_incidents.append(incident)
 	game.entropy += Constants.INCIDENT_CREATE_ENTROPY_GAIN
+	game.stability = maxf(0.0, game.stability - Constants.INCIDENT_CREATE_STABILITY_DAMAGE)
 	return incident.duplicate(true)
 
 

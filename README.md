@@ -14,6 +14,20 @@ This project is pure vibe coding, just for fun.
 
 本项目属于纯氛围编程，纯属娱乐。
 
+## Simulation｜模拟
+
+You can run the balance simulator with Godot in headless mode:
+
+你可以用 Godot 的 headless 模式运行平衡性模拟：
+
+```bash
+godot --headless -s tools/simulate.gd
+```
+
+It prints the ending distribution summary directly in the terminal.
+
+它会直接在终端输出结局分布汇总。
+
 ## Credits｜致谢
 
 - Built with Godot | 基于 Godot 开发

@@ -24,6 +24,12 @@ const FONT_REGULAR := preload("res://ui/font-mono.ttf")
 const FONT_BOLD := preload("res://ui/font-bold.ttf")
 const FONT_ITALIC := preload("res://ui/font-italic.ttf")
 const FONT_BOLD_ITALIC := preload("res://ui/font-bold-italic.ttf")
+const FONT_SCALE := 1.15
+
+
+static func scaled_font_size(base_size: int) -> int:
+	assert(base_size >= 1)
+	return maxi(1, int(round(float(base_size) * FONT_SCALE)))
 
 
 func build(root: Node, time_left_text: String, status_items: Array) -> Dictionary:
@@ -71,8 +77,6 @@ func build(root: Node, time_left_text: String, status_items: Array) -> Dictionar
 		"status_title_label": workspace["status_title_label"],
 		"agents_title_label": workspace["agents_title_label"],
 		"reviews_title_label": workspace["reviews_title_label"],
-		"incidents_title_label": workspace["incidents_title_label"],
-		"incident_hint_label": workspace["incident_hint_label"],
 		"mail_title_label": workspace["mail_title_label"],
 		"status_name_labels": workspace["status_name_labels"],
 		"status_value_labels": workspace["status_value_labels"],
@@ -88,7 +92,7 @@ func build(root: Node, time_left_text: String, status_items: Array) -> Dictionar
 func _build_top_bar(time_left_text: String) -> Dictionary:
 	var panel := PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.custom_minimum_size = Vector2(0, 68)
+	panel.custom_minimum_size = Vector2(0, 76)
 	panel.add_theme_stylebox_override("panel", _stylebox(PANEL_DARK, BORDER, 2, 8))
 
 	var margin := MarginContainer.new()
@@ -112,15 +116,15 @@ func _build_top_bar(time_left_text: String) -> Dictionary:
 	title_label.text = tr("TITLE")
 	_apply_font(title_label, FONT_BOLD)
 	title_label.add_theme_color_override("font_color", TITLE)
-	title_label.add_theme_font_size_override("font_size", 28)
+	title_label.add_theme_font_size_override("font_size", scaled_font_size(28))
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	left_group.add_child(title_label)
 
 	var hotkey_hint_label := Label.new()
-	hotkey_hint_label.text = ""
+	hotkey_hint_label.text = tr("HOTKEY_HINT")
 	_apply_font(hotkey_hint_label)
 	hotkey_hint_label.add_theme_color_override("font_color", TEXT_DIM)
-	hotkey_hint_label.add_theme_font_size_override("font_size", 16)
+	hotkey_hint_label.add_theme_font_size_override("font_size", scaled_font_size(16))
 	left_group.add_child(hotkey_hint_label)
 
 	var time_center := CenterContainer.new()
@@ -131,7 +135,7 @@ func _build_top_bar(time_left_text: String) -> Dictionary:
 	time_label.text = time_left_text
 	_apply_font(time_label, FONT_BOLD)
 	time_label.add_theme_color_override("font_color", TEXT)
-	time_label.add_theme_font_size_override("font_size", 26)
+	time_label.add_theme_font_size_override("font_size", scaled_font_size(26))
 	time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	time_center.add_child(time_label)
 
@@ -139,7 +143,7 @@ func _build_top_bar(time_left_text: String) -> Dictionary:
 	round_label.text = ""
 	_apply_font(round_label, FONT_BOLD)
 	round_label.add_theme_color_override("font_color", TEXT_DIM)
-	round_label.add_theme_font_size_override("font_size", 24)
+	round_label.add_theme_font_size_override("font_size", scaled_font_size(24))
 	round_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	round_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	hbox.add_child(round_label)
@@ -178,7 +182,7 @@ func _build_workspace(status_items: Array) -> Dictionary:
 	var center_column := VBoxContainer.new()
 	center_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	center_column.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	center_column.custom_minimum_size = Vector2(600, 0)
+	center_column.custom_minimum_size = Vector2(520, 0)
 	center_column.add_theme_constant_override("separation", 12)
 	workspace.add_child(center_column)
 
@@ -202,7 +206,7 @@ func _build_workspace(status_items: Array) -> Dictionary:
 
 	var task_panel: Dictionary = _build_task_panel()
 	var task_widget: Control = task_panel["panel"]
-	task_widget.custom_minimum_size = Vector2(0, 280)
+	task_widget.custom_minimum_size = Vector2(0, 400)
 	right_column.add_child(task_widget)
 
 	var review_panel: Dictionary = _build_review_panel()
@@ -210,18 +214,11 @@ func _build_workspace(status_items: Array) -> Dictionary:
 	review_widget.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	right_column.add_child(review_widget)
 
-	var incident_panel: Dictionary = _build_incident_panel()
-	var incident_widget: Control = incident_panel["panel"]
-	incident_widget.custom_minimum_size = Vector2(0, 210)
-	right_column.add_child(incident_widget)
-
 	return {
 		"panel": workspace,
 		"status_title_label": status_panel["title_label"],
 		"agents_title_label": agents_panel["title_label"],
 		"reviews_title_label": review_panel["title_label"],
-		"incidents_title_label": incident_panel["title_label"],
-		"incident_hint_label": incident_panel["hint_label"],
 		"mail_title_label": mail_panel["title_label"],
 		"status_name_labels": status_panel["name_labels"],
 		"status_value_labels": status_panel["value_labels"],
@@ -278,7 +275,7 @@ func _build_mail_panel() -> Dictionary:
 	mail_list.select_mode = ItemList.SELECT_SINGLE
 	mail_list.allow_reselect = true
 	mail_list.add_theme_font_override("font", FONT_REGULAR)
-	mail_list.add_theme_font_size_override("font_size", 14)
+	mail_list.add_theme_font_size_override("font_size", scaled_font_size(14))
 	content.add_child(mail_list)
 
 	content.add_child(HSeparator.new())
@@ -295,7 +292,7 @@ func _build_mail_panel() -> Dictionary:
 	mail_detail_view.add_theme_font_override("bold_font", FONT_BOLD)
 	mail_detail_view.add_theme_font_override("italics_font", FONT_ITALIC)
 	mail_detail_view.add_theme_font_override("bold_italics_font", FONT_BOLD_ITALIC)
-	mail_detail_view.add_theme_font_size_override("normal_font_size", 14)
+	mail_detail_view.add_theme_font_size_override("normal_font_size", scaled_font_size(14))
 	content.add_child(mail_detail_view)
 
 	return {
@@ -324,7 +321,7 @@ func _build_log_panel() -> Dictionary:
 	log_view.add_theme_font_override("bold_font", FONT_BOLD)
 	log_view.add_theme_font_override("italics_font", FONT_ITALIC)
 	log_view.add_theme_font_override("bold_italics_font", FONT_BOLD_ITALIC)
-	log_view.add_theme_font_size_override("normal_font_size", 15)
+	log_view.add_theme_font_size_override("normal_font_size", scaled_font_size(15))
 	content.add_child(log_view)
 
 	return {
@@ -406,26 +403,6 @@ func _build_task_panel() -> Dictionary:
 	}
 
 
-func _build_incident_panel() -> Dictionary:
-	var panel := _panel_with_title(tr("INCIDENTS"))
-	var title_label := panel.get_meta("title_label") as Label
-	var content := panel.get_meta("content") as VBoxContainer
-
-	var hint_label := Label.new()
-	hint_label.text = tr("INCIDENT_PANEL_HINT")
-	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint_label.add_theme_font_override("font", FONT_REGULAR)
-	hint_label.add_theme_font_size_override("font_size", 13)
-	hint_label.add_theme_color_override("font_color", TEXT_DIM)
-	content.add_child(hint_label)
-
-	return {
-		"panel": panel,
-		"title_label": title_label,
-		"hint_label": hint_label,
-	}
-
-
 func _metric_tile(item_name: String, value: float, color: Color) -> Dictionary:
 	var tile := PanelContainer.new()
 	tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -446,14 +423,14 @@ func _metric_tile(item_name: String, value: float, color: Color) -> Dictionary:
 	name_label.text = item_name
 	_apply_font(name_label, FONT_BOLD)
 	name_label.add_theme_color_override("font_color", color)
-	name_label.add_theme_font_size_override("font_size", 14)
+	name_label.add_theme_font_size_override("font_size", scaled_font_size(14))
 	vbox.add_child(name_label)
 
 	var value_label := Label.new()
 	value_label.text = "%.1f/100" % value
 	_apply_font(value_label)
 	value_label.add_theme_color_override("font_color", TITLE)
-	value_label.add_theme_font_size_override("font_size", 15)
+	value_label.add_theme_font_size_override("font_size", scaled_font_size(15))
 	vbox.add_child(value_label)
 
 	return {"tile": tile, "name_label": name_label, "value_label": value_label}
@@ -465,7 +442,7 @@ func _section_header(text: String) -> Label:
 	label.text = text
 	_apply_font(label, FONT_BOLD)
 	label.add_theme_color_override("font_color", COLOR_BLUE)
-	label.add_theme_font_size_override("font_size", 16)
+	label.add_theme_font_size_override("font_size", scaled_font_size(16))
 	return label
 
 
@@ -476,7 +453,7 @@ func _info_label(text: String) -> Label:
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_apply_font(label)
 	label.add_theme_color_override("font_color", TEXT_DIM)
-	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_font_size_override("font_size", scaled_font_size(14))
 	return label
 
 
@@ -502,7 +479,7 @@ func _panel_with_title(title_text: String) -> PanelContainer:
 	title.text = title_text
 	_apply_font(title, FONT_BOLD)
 	title.add_theme_color_override("font_color", TITLE)
-	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_font_size_override("font_size", scaled_font_size(22))
 	vbox.add_child(title)
 
 	var sep := HSeparator.new()

@@ -19,6 +19,7 @@ var model_intelligence: bool = true
 var last_outcome: Outcome = Outcome.NONE
 var outcome_history: Array[int] = []
 var tick_accumulator_seconds: float = 0.0
+var delayed_mail_tick_accumulator_seconds: float = 0.0
 var elapsed_ticks: int = 0
 var scheduler_cursor: int = 0
 
@@ -34,6 +35,7 @@ var next_task_id: int = 0
 var next_review_id: int = 0
 var next_incident_id: int = 0
 var next_agent_suffix: int = 0
+var pending_delayed_mail_logs: Array[Dictionary] = []
 
 
 func _init() -> void:
@@ -56,6 +58,7 @@ func start_round(new_round_index: int) -> void:
 	model_intelligence = Constants.INITIAL_MODEL_INTELLIGENCE
 	last_outcome = Outcome.NONE
 	tick_accumulator_seconds = 0.0
+	delayed_mail_tick_accumulator_seconds = 0.0
 	elapsed_ticks = 0
 	scheduler_cursor = 0
 
@@ -64,6 +67,7 @@ func start_round(new_round_index: int) -> void:
 	next_review_id = Constants.INITIAL_REVIEW_ID
 	next_incident_id = Constants.INITIAL_INCIDENT_ID
 	next_agent_suffix = Constants.INITIAL_AGENT_SUFFIX
+	pending_delayed_mail_logs.clear()
 
 	goal = {
 		"id": "goal-%d" % next_goal_id,
@@ -191,6 +195,48 @@ func inspect_target(target: String) -> Dictionary:
 func advance_time(delta_seconds: float) -> Array[Dictionary]:
 	assert(delta_seconds >= 0.0)
 	return ticks.advance(self, delta_seconds)
+
+
+func advance_delayed_mail(delta_seconds: float) -> Array[Dictionary]:
+	assert(delta_seconds >= 0.0)
+	var events: Array[Dictionary] = []
+	delayed_mail_tick_accumulator_seconds += delta_seconds
+	while delayed_mail_tick_accumulator_seconds >= Constants.TICK_SECONDS:
+		delayed_mail_tick_accumulator_seconds -= Constants.TICK_SECONDS
+		_dispatch_delayed_mail_logs(events)
+	return events
+
+
+func queue_delayed_mail_logs(logs: Array[Dictionary], delay_seconds: int) -> void:
+	assert(delay_seconds >= 0)
+	for item in logs:
+		assert(item.has("event_key"))
+		assert(item.has("level"))
+		(
+			pending_delayed_mail_logs
+			. append(
+				{
+					"delay_ticks": delay_seconds,
+					"log": item.duplicate(true),
+				}
+			)
+		)
+
+
+func _dispatch_delayed_mail_logs(events: Array[Dictionary]) -> void:
+	if pending_delayed_mail_logs.is_empty():
+		return
+	var remaining: Array[Dictionary] = []
+	for queued in pending_delayed_mail_logs:
+		assert(queued.has("delay_ticks"))
+		assert(queued.has("log"))
+		var delay_ticks: int = int(queued["delay_ticks"]) - 1
+		if delay_ticks > 0:
+			queued["delay_ticks"] = delay_ticks
+			remaining.append(queued)
+			continue
+		events.append({"type": "mail_delivered", "log": queued["log"]})
+	pending_delayed_mail_logs = remaining
 
 
 func start_patch_for_agent(target: String) -> Dictionary:

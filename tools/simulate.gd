@@ -1,61 +1,27 @@
 extends SceneTree
 
-const DEFAULT_SEED_VALUE := 42
-const DEFAULT_TOTAL_ROUNDS := 10
+const DEFAULT_TOTAL_ROUNDS := 60
 const SIM_STEP_SECONDS := 1.0
-const DEFAULT_LOG_PATH := "res://export/simulate.log"
+const DEFAULT_BASE_SEED := 42
 
 const SPEED_SECONDS_LEVELS: Array[int] = [5, 10, 15, 20]
 const REVIEW_ACCURACY_PERCENT_LEVELS: Array[int] = [0, 25, 50, 75, 100]
 const PATCH_RATE_PERCENT_LEVELS: Array[int] = [0, 25, 50, 75, 100]
 
-var _console: Console
-var _log_lines: Array[String] = []
-var _print_logs_to_stdout := false
-
 
 func _init() -> void:
-	_console = Console.new()
-	var args: PackedStringArray = OS.get_cmdline_user_args()
-	_print_logs_to_stdout = args.has("--print-logs")
-
-	var seed_value := int(_arg_value(args, "--seed", str(DEFAULT_SEED_VALUE)))
-	var total_rounds := int(_arg_value(args, "--rounds", str(DEFAULT_TOTAL_ROUNDS)))
-	var log_path := _arg_value(args, "--log-file", DEFAULT_LOG_PATH)
-
 	var scenarios: Array[Dictionary] = _build_human_scenarios()
-	var selected_scenarios := _select_scenarios_for_rounds(scenarios, total_rounds)
+	var selected_scenarios := _select_scenarios_for_rounds(scenarios, DEFAULT_TOTAL_ROUNDS)
 	var run_reports: Array[Dictionary] = []
 	for index in range(selected_scenarios.size()):
 		var scenario: Dictionary = selected_scenarios[index]
-		seed(seed_value + index)
+		seed(DEFAULT_BASE_SEED + index)
 		var report: Dictionary = _run_round(scenario)
 		run_reports.append({"scenario": scenario, "report": report})
 
 	_print_sweep_analysis(run_reports)
-	_write_logs(log_path)
-	print("simulation completed. log_file=%s" % ProjectSettings.globalize_path(log_path))
+	print("simulation completed.")
 	quit()
-
-
-func _arg_value(args: PackedStringArray, key: String, fallback: String) -> String:
-	for arg in args:
-		if not arg.begins_with(key + "="):
-			continue
-		return arg.trim_prefix(key + "=")
-	return fallback
-
-
-func _write_logs(log_path: String) -> void:
-	var absolute_path := ProjectSettings.globalize_path(log_path)
-	var file := FileAccess.open(log_path, FileAccess.WRITE)
-	if file == null:
-		push_error("failed to open log file: %s" % absolute_path)
-		return
-	for line in _log_lines:
-		file.store_line(line)
-	file.flush()
-	file.close()
 
 
 func _build_human_scenarios() -> Array[Dictionary]:
@@ -85,64 +51,24 @@ func _build_human_scenarios() -> Array[Dictionary]:
 
 
 func _build_agent_mixes() -> Array[Dictionary]:
-	return [
-		{
-			"id": "pg",
-			"generator_count": 1,
-			"planner_count": 1,
-			"evaluator_count": 0,
-			"total_agents": 2
-		},
-		{
-			"id": "ge",
-			"generator_count": 1,
-			"planner_count": 0,
-			"evaluator_count": 1,
-			"total_agents": 2
-		},
-		{
-			"id": "pge",
-			"generator_count": 1,
-			"planner_count": 1,
-			"evaluator_count": 1,
-			"total_agents": 3
-		},
-		{
-			"id": "ppg",
-			"generator_count": 1,
-			"planner_count": 2,
-			"evaluator_count": 0,
-			"total_agents": 3
-		},
-		{
-			"id": "gee",
-			"generator_count": 1,
-			"planner_count": 0,
-			"evaluator_count": 2,
-			"total_agents": 3
-		},
-		{
-			"id": "pgg",
-			"generator_count": 2,
-			"planner_count": 1,
-			"evaluator_count": 0,
-			"total_agents": 3
-		},
-		{
-			"id": "gge",
-			"generator_count": 2,
-			"planner_count": 0,
-			"evaluator_count": 1,
-			"total_agents": 3
-		},
-		{
-			"id": "ggg",
-			"generator_count": 3,
-			"planner_count": 0,
-			"evaluator_count": 0,
-			"total_agents": 3
-		},
-	]
+	var mixes: Array[Dictionary] = []
+	for total_agents in range(1, 6):
+		for planner_count in range(total_agents + 1):
+			for generator_count in range(total_agents - planner_count + 1):
+				var evaluator_count := total_agents - planner_count - generator_count
+				(
+					mixes
+					. append(
+						{
+							"id": "p%dg%de%d" % [planner_count, generator_count, evaluator_count],
+							"generator_count": generator_count,
+							"planner_count": planner_count,
+							"evaluator_count": evaluator_count,
+							"total_agents": total_agents,
+						}
+					)
+				)
+	return mixes
 
 
 func _run_round(scenario: Dictionary) -> Dictionary:
@@ -157,9 +83,7 @@ func _run_round(scenario: Dictionary) -> Dictionary:
 		if elapsed_seconds % speed_seconds == 0:
 			_human_take_actions(game, scenario, elapsed_seconds)
 
-		var tick_events := game.advance_time(SIM_STEP_SECONDS)
-		if not tick_events.is_empty():
-			_record_mapped_logs(game, scenario, elapsed_seconds + 1, "tick", tick_events)
+		game.advance_time(SIM_STEP_SECONDS)
 
 		elapsed_seconds += 1
 
@@ -181,11 +105,28 @@ func _select_scenarios_for_rounds(
 	if scenarios.is_empty():
 		return []
 	var rounds := maxi(1, total_rounds)
+	if rounds >= scenarios.size():
+		var all_scenarios: Array[Dictionary] = []
+		for scenario in scenarios:
+			all_scenarios.append(scenario)
+		return all_scenarios
+	var scenarios_by_mix: Dictionary = {}
+	var mix_order: Array[String] = []
+	for scenario in scenarios:
+		var mix_id: String = scenario["mix_id"]
+		if not scenarios_by_mix.has(mix_id):
+			scenarios_by_mix[mix_id] = []
+			mix_order.append(mix_id)
+		var bucket: Array = scenarios_by_mix[mix_id]
+		bucket.append(scenario)
+		scenarios_by_mix[mix_id] = bucket
 	var selected: Array[Dictionary] = []
-	var step: float = scenarios.size() * 1.0 / rounds
 	for i in range(rounds):
-		var index := mini(scenarios.size() - 1, int(floor(i * step)))
-		selected.append(scenarios[index])
+		var mix_id := mix_order[i % mix_order.size()]
+		var bucket: Array = scenarios_by_mix[mix_id]
+		var bucket_step: float = bucket.size() * 1.0 / rounds
+		var bucket_index := mini(bucket.size() - 1, int(floor(i * bucket_step)))
+		selected.append(bucket[bucket_index])
 	return selected
 
 
@@ -283,12 +224,14 @@ func _patch_clearable_incidents(
 
 
 func _perform_and_record(
-	game: Game, scenario: Dictionary, tick: int, source: String, action: String, target: String = ""
+	game: Game,
+	_scenario: Dictionary,
+	_tick: int,
+	_source: String,
+	action: String,
+	target: String = ""
 ) -> void:
-	var events := _run_action(game, action, target)
-	if events.is_empty():
-		return
-	_record_mapped_logs(game, scenario, tick, source, events)
+	_run_action(game, action, target)
 
 
 func _run_action(game: Game, action: String, target: String) -> Array[Dictionary]:
@@ -369,28 +312,6 @@ func _run_action(game: Game, action: String, target: String) -> Array[Dictionary
 	return events
 
 
-func _record_mapped_logs(
-	game: Game, scenario: Dictionary, tick: int, source: String, events: Array[Dictionary]
-) -> void:
-	var mapped_logs: Array[Dictionary] = []
-	if source == "tick":
-		mapped_logs = _console.map_tick_events(events, game)
-	else:
-		mapped_logs = _console.map_events(events, game)
-	for item in mapped_logs:
-		var payload: Dictionary = item.duplicate(true)
-		payload["tick"] = tick
-		payload["source"] = source
-		payload["mix_id"] = scenario["mix_id"]
-		payload["speed_seconds"] = scenario["speed_seconds"]
-		payload["accuracy_percent"] = scenario["accuracy_percent"]
-		payload["patch_rate_percent"] = scenario["patch_rate_percent"]
-		var line := JSON.stringify(payload)
-		_log_lines.append(line)
-		if _print_logs_to_stdout:
-			print(line)
-
-
 func _new_outcome_counter() -> Dictionary:
 	return {
 		"KPI": 0,
@@ -421,6 +342,13 @@ func _print_sweep_analysis(run_reports: Array[Dictionary]) -> void:
 
 	_print_distribution_header()
 	_print_distribution_row("overall", run_reports, _aggregate_outcomes(run_reports))
+	for total_agents in range(1, 6):
+		var size_group: Array[Dictionary] = _entries_by_total_agents(run_reports, total_agents)
+		if size_group.is_empty():
+			continue
+		_print_distribution_row(
+			"agents-%d" % total_agents, size_group, _aggregate_outcomes(size_group)
+		)
 	for mix in _build_agent_mixes():
 		var mix_id: String = mix["id"]
 		var group: Array[Dictionary] = _entries_by_mix(run_reports, mix_id)
@@ -507,5 +435,16 @@ func _entries_by_mix(run_reports: Array[Dictionary], mix_id: String) -> Array[Di
 	for entry in run_reports:
 		var scenario: Dictionary = entry["scenario"]
 		if scenario["mix_id"] == mix_id:
+			entries.append(entry)
+	return entries
+
+
+func _entries_by_total_agents(
+	run_reports: Array[Dictionary], total_agents: int
+) -> Array[Dictionary]:
+	var entries: Array[Dictionary] = []
+	for entry in run_reports:
+		var scenario: Dictionary = entry["scenario"]
+		if int(scenario["total_agents"]) == total_agents:
 			entries.append(entry)
 	return entries

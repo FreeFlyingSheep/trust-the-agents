@@ -1,7 +1,7 @@
 class_name Copybook
 extends RefCounted
 
-const TRANSCRIPTS_PATH := "res://game/transcripts.csv"
+const EN_TRANSLATION_PATH := "res://game/transcripts.en.translation"
 
 var _keys_by_prefix: Dictionary = {}
 
@@ -85,21 +85,13 @@ func has_structured_variant(
 
 func _load_transcript_index() -> void:
 	_keys_by_prefix.clear()
-	var file := FileAccess.open(TRANSCRIPTS_PATH, FileAccess.READ)
-	assert(file != null)
-
-	var is_header := true
-	while not file.eof_reached():
-		var row := file.get_csv_line()
-		if row.is_empty():
-			continue
-		var raw_key := row[0].strip_edges()
+	var translation := load(EN_TRANSLATION_PATH) as Translation
+	assert(translation != null, "Missing translation resource: %s" % EN_TRANSLATION_PATH)
+	var keys: PackedStringArray = translation.get_message_list()
+	assert(not keys.is_empty(), "Translation has no message keys: %s" % EN_TRANSLATION_PATH)
+	for raw_key in keys:
 		if raw_key.is_empty():
 			continue
-		if is_header:
-			is_header = false
-			if raw_key == "keys":
-				continue
 		_register_key(raw_key)
 
 

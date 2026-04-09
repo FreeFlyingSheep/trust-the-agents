@@ -2,7 +2,6 @@ class_name Feed
 extends RefCounted
 
 const MAIL_HISTORY_LIMIT := 12
-const LOG_EMIT_INTERVAL_SECONDS := 0.8
 const LOGS_PER_FLUSH := 1
 
 var log_view: RichTextLabel
@@ -15,6 +14,7 @@ var selected_mail_index := -1
 var pending_log_queue: Array[Dictionary] = []
 var log_emit_accumulator_seconds := 0.0
 var mail_updated_at_counter := 0
+var seen_incident_mail_ids: Dictionary = {}
 
 
 func _t(key: String) -> String:
@@ -52,13 +52,17 @@ func queue_mapped_logs(logs: Array[Dictionary]) -> void:
 		pending_log_queue.append(item)
 
 
+func is_idle() -> bool:
+	return pending_log_queue.is_empty()
+
+
 func flush(delta: float) -> void:
 	assert(delta >= 0.0)
 	if pending_log_queue.is_empty():
 		log_emit_accumulator_seconds = 0.0
 		return
 	log_emit_accumulator_seconds += delta
-	if log_emit_accumulator_seconds < LOG_EMIT_INTERVAL_SECONDS:
+	if log_emit_accumulator_seconds < Constants.FEED_LOG_EMIT_INTERVAL_SECONDS:
 		return
 	log_emit_accumulator_seconds = 0.0
 	var emitted := 0
@@ -83,15 +87,20 @@ func on_mail_selected(index: int) -> void:
 
 func _append_logs_internal(logs: Array[Dictionary]) -> void:
 	assert(log_view != null)
+	var has_mail_update := false
 	for item in logs:
 		assert(item.has("level"))
 		assert(item.has("event_key"))
+		if item["event_key"] == "TITLE":
+			seen_incident_mail_ids.clear()
 		if _is_mail_feed_item(item):
 			_collect_mail_notification(item)
+			has_mail_update = true
 			continue
 		log_history.append(item)
 		log_view.append_text(_format_log(item) + "\n")
-	_render_mail_history()
+	if has_mail_update:
+		_render_mail_history()
 
 
 func _rerender_log_history() -> void:
@@ -176,12 +185,32 @@ func _collect_mail_notification(item: Dictionary) -> void:
 		return
 	var is_incident_notice: bool = item["event_key"] == "NOTIFIER"
 	if is_incident_notice:
+		var incident_id := _incident_notice_id(item)
+		if not incident_id.is_empty():
+			if seen_incident_mail_ids.has(incident_id):
+				return
+			seen_incident_mail_ids[incident_id] = true
 		_upsert_mail("notifier", "NOTIFIER", "MAIL_SUBJECT_NOTIFIER", item, false)
 		return
 	if item["event_key"] == "BOSS":
 		_upsert_mail("boss", "BOSS", "MAIL_SUBJECT_BOSS", item, true)
 		return
 	_upsert_mail("colleague", "COLLEAGUE", "MAIL_SUBJECT_COLLEAGUE", item, true)
+
+
+func _incident_notice_id(item: Dictionary) -> String:
+	if not item.has("message_args"):
+		return ""
+	var args_variant: Variant = item["message_args"]
+	if not (args_variant is Array):
+		return ""
+	var args: Array = args_variant
+	if args.is_empty():
+		return ""
+	var first_arg: Variant = args[0]
+	if first_arg is String:
+		return first_arg
+	return ""
 
 
 func _upsert_mail(

@@ -17,6 +17,18 @@ func _tf(key: String, args: Array = []) -> String:
 	return template % args
 
 
+func _tf_random_variant(key_prefix: String, args: Array = []) -> String:
+	var variant_keys: Array[String] = []
+	for index in range(10):
+		var candidate := "%s__%02d" % [key_prefix, index]
+		if tr(candidate) == candidate:
+			break
+		variant_keys.append(candidate)
+	if variant_keys.is_empty():
+		return _tf(key_prefix, args)
+	return _tf(variant_keys.pick_random(), args)
+
+
 func refresh_review_slots(
 	container: VBoxContainer,
 	logged_in: bool,
@@ -33,7 +45,7 @@ func refresh_review_slots(
 		empty_label.text = _t("REVIEWS_EMPTY")
 		empty_label.add_theme_font_override("font", Ui.FONT_REGULAR)
 		empty_label.add_theme_color_override("font_color", Ui.TEXT_DIM)
-		empty_label.add_theme_font_size_override("font_size", 13)
+		empty_label.add_theme_font_size_override("font_size", Ui.scaled_font_size(13))
 		container.add_child(empty_label)
 		return
 	for item in pending_items:
@@ -53,7 +65,7 @@ func refresh_task_slots(
 		empty_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		empty_label.add_theme_font_override("font", Ui.FONT_REGULAR)
 		empty_label.add_theme_color_override("font_color", Ui.TEXT_DIM)
-		empty_label.add_theme_font_size_override("font_size", 13)
+		empty_label.add_theme_font_size_override("font_size", Ui.scaled_font_size(13))
 		task_slots_container.add_child(empty_label)
 		return
 	for index in range(tasks.size()):
@@ -81,7 +93,7 @@ func _build_task_slot(index: int, content_text: String, status: String) -> Panel
 	line.text = "%d. %s" % [index, content_text]
 	line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	line.add_theme_font_override("font", Ui.FONT_REGULAR)
-	line.add_theme_font_size_override("font_size", 12)
+	line.add_theme_font_size_override("font_size", Ui.scaled_font_size(12))
 	line.add_theme_color_override("font_color", Ui.TEXT)
 	margin.add_child(line)
 
@@ -156,7 +168,8 @@ func refresh_agent_board(
 			agent, logged_in, game, agent_activity_text, on_trust, on_mute, on_patch, on_kill
 		)
 		container.add_child(card)
-	container.add_child(_build_add_agent_card(logged_in, on_add))
+	if logged_in:
+		container.add_child(_build_add_agent_card(logged_in, on_add))
 	return signature
 
 
@@ -167,10 +180,13 @@ func _build_review_slot(
 	assert(item.has("task_id"))
 	assert(item.has("agent_id"))
 	assert(item.has("step"))
+	assert(item.has("content_quality"))
 	var ticket_id: String = item["ticket_id"]
 	var task_id: String = item["task_id"]
 	var agent_id: String = item["agent_id"]
 	var step: String = item["step"]
+	var content_quality: String = item["content_quality"]
+	assert(content_quality in [Constants.REVIEW_CONTENT_GOOD, Constants.REVIEW_CONTENT_BAD])
 	var slot := PanelContainer.new()
 	slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slot.add_theme_stylebox_override(
@@ -191,15 +207,18 @@ func _build_review_slot(
 	var title := Label.new()
 	title.text = agent_id
 	title.add_theme_font_override("font", Ui.FONT_BOLD)
-	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_font_size_override("font_size", Ui.scaled_font_size(13))
 	title.add_theme_color_override("font_color", Ui.TITLE)
 	vbox.add_child(title)
 
 	var detail := Label.new()
-	detail.text = _tf("REVIEW_SLOT_DETAIL", [task_id, tr(step), ticket_id])
+	var detail_key := "REVIEW_SLOT_DETAIL_GOOD"
+	if content_quality == Constants.REVIEW_CONTENT_BAD:
+		detail_key = "REVIEW_SLOT_DETAIL_BAD"
+	detail.text = _tf_random_variant(detail_key, [task_id, tr(step), ticket_id])
 	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	detail.add_theme_font_override("font", Ui.FONT_REGULAR)
-	detail.add_theme_font_size_override("font_size", 12)
+	detail.add_theme_font_size_override("font_size", Ui.scaled_font_size(12))
 	detail.add_theme_color_override("font_color", Ui.TEXT_DIM)
 	vbox.add_child(detail)
 
@@ -211,18 +230,18 @@ func _build_review_slot(
 	var approve_button := Button.new()
 	approve_button.text = tr("APPROVE")
 	approve_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	approve_button.custom_minimum_size = Vector2(0, 26)
+	approve_button.custom_minimum_size = Vector2(0, 28)
 	approve_button.add_theme_font_override("font", Ui.FONT_BOLD)
-	approve_button.add_theme_font_size_override("font_size", 12)
+	approve_button.add_theme_font_size_override("font_size", Ui.scaled_font_size(12))
 	buttons.add_child(approve_button)
 	approve_button.pressed.connect(approve_cb.bind(ticket_id))
 
 	var deny_button := Button.new()
 	deny_button.text = tr("DENY")
 	deny_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	deny_button.custom_minimum_size = Vector2(0, 26)
+	deny_button.custom_minimum_size = Vector2(0, 28)
 	deny_button.add_theme_font_override("font", Ui.FONT_BOLD)
-	deny_button.add_theme_font_size_override("font_size", 12)
+	deny_button.add_theme_font_size_override("font_size", Ui.scaled_font_size(12))
 	buttons.add_child(deny_button)
 	deny_button.pressed.connect(deny_cb.bind(ticket_id))
 	return slot
@@ -265,14 +284,14 @@ func _build_agent_card(
 	name_label.text = "%s · %s" % [agent_id, tr(agent["type"])]
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_label.add_theme_font_override("font", Ui.FONT_BOLD)
-	name_label.add_theme_font_size_override("font_size", 14)
+	name_label.add_theme_font_size_override("font_size", Ui.scaled_font_size(14))
 	name_label.add_theme_color_override("font_color", Ui.TITLE)
 	header.add_child(name_label)
 
 	var state_label := Label.new()
 	state_label.text = _agent_state_text(agent["state"])
 	state_label.add_theme_font_override("font", Ui.FONT_BOLD)
-	state_label.add_theme_font_size_override("font_size", 11)
+	state_label.add_theme_font_size_override("font_size", Ui.scaled_font_size(11))
 	state_label.add_theme_color_override(
 		"font_color", _agent_state_color(agent["state"], agent["online"])
 	)
@@ -284,7 +303,7 @@ func _build_agent_card(
 	)
 	detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	detail_label.add_theme_font_override("font", Ui.FONT_REGULAR)
-	detail_label.add_theme_font_size_override("font_size", 12)
+	detail_label.add_theme_font_size_override("font_size", Ui.scaled_font_size(12))
 	detail_label.add_theme_color_override("font_color", Ui.TEXT_DIM)
 	vbox.add_child(detail_label)
 
@@ -296,40 +315,40 @@ func _build_agent_card(
 	var trust_button := Button.new()
 	trust_button.text = tr("DISTRUST") if agent["trusted"] else tr("TRUST")
 	trust_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	trust_button.custom_minimum_size = Vector2(0, 24)
+	trust_button.custom_minimum_size = Vector2(0, 26)
 	trust_button.disabled = not logged_in
 	trust_button.add_theme_font_override("font", Ui.FONT_BOLD)
-	trust_button.add_theme_font_size_override("font_size", 11)
+	trust_button.add_theme_font_size_override("font_size", Ui.scaled_font_size(11))
 	action_row.add_child(trust_button)
 	trust_button.pressed.connect(on_trust.bind(agent_id))
 
 	var mute_button := Button.new()
 	mute_button.text = tr("UNMUTE") if agent["muted"] else tr("MUTE")
 	mute_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mute_button.custom_minimum_size = Vector2(0, 24)
+	mute_button.custom_minimum_size = Vector2(0, 26)
 	mute_button.disabled = not logged_in
 	mute_button.add_theme_font_override("font", Ui.FONT_BOLD)
-	mute_button.add_theme_font_size_override("font_size", 11)
+	mute_button.add_theme_font_size_override("font_size", Ui.scaled_font_size(11))
 	action_row.add_child(mute_button)
 	mute_button.pressed.connect(on_mute.bind(agent_id))
 
 	var patch_button := Button.new()
 	patch_button.text = tr("PATCH")
 	patch_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	patch_button.custom_minimum_size = Vector2(0, 24)
+	patch_button.custom_minimum_size = Vector2(0, 26)
 	patch_button.disabled = (not logged_in or not agent["online"] or agent["is_patching"])
 	patch_button.add_theme_font_override("font", Ui.FONT_BOLD)
-	patch_button.add_theme_font_size_override("font_size", 11)
+	patch_button.add_theme_font_size_override("font_size", Ui.scaled_font_size(11))
 	action_row.add_child(patch_button)
 	patch_button.pressed.connect(on_patch.bind(agent_id))
 
 	var power_button := Button.new()
 	power_button.text = tr("KILL")
 	power_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	power_button.custom_minimum_size = Vector2(0, 24)
+	power_button.custom_minimum_size = Vector2(0, 26)
 	power_button.disabled = not logged_in
 	power_button.add_theme_font_override("font", Ui.FONT_BOLD)
-	power_button.add_theme_font_size_override("font_size", 11)
+	power_button.add_theme_font_size_override("font_size", Ui.scaled_font_size(11))
 	action_row.add_child(power_button)
 	power_button.pressed.connect(on_kill.bind(agent_id))
 
@@ -358,7 +377,7 @@ func _build_add_agent_card(logged_in: bool, on_add: Callable) -> PanelContainer:
 	title_label.text = _t("ADD_AGENT")
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title_label.add_theme_font_override("font", Ui.FONT_BOLD)
-	title_label.add_theme_font_size_override("font_size", 13)
+	title_label.add_theme_font_size_override("font_size", Ui.scaled_font_size(13))
 	title_label.add_theme_color_override("font_color", Ui.TITLE)
 	vbox.add_child(title_label)
 
@@ -366,7 +385,7 @@ func _build_add_agent_card(logged_in: bool, on_add: Callable) -> PanelContainer:
 	hint_label.text = _t("ADD_AGENT_HINT")
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint_label.add_theme_font_override("font", Ui.FONT_REGULAR)
-	hint_label.add_theme_font_size_override("font_size", 11)
+	hint_label.add_theme_font_size_override("font_size", Ui.scaled_font_size(11))
 	hint_label.add_theme_color_override("font_color", Ui.TEXT_DIM)
 	vbox.add_child(hint_label)
 
@@ -380,10 +399,10 @@ func _build_add_agent_card(logged_in: bool, on_add: Callable) -> PanelContainer:
 		role_button.text = tr(role)
 		role_button.tooltip_text = tr(role)
 		role_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		role_button.custom_minimum_size = Vector2(0, 24)
+		role_button.custom_minimum_size = Vector2(0, 26)
 		role_button.disabled = not logged_in
 		role_button.add_theme_font_override("font", Ui.FONT_BOLD)
-		role_button.add_theme_font_size_override("font_size", 11)
+		role_button.add_theme_font_size_override("font_size", Ui.scaled_font_size(11))
 		role_button.pressed.connect(on_add.bind(role))
 		button_row.add_child(role_button)
 

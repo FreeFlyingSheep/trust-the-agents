@@ -4,6 +4,10 @@ extends RefCounted
 var ending_rules = preload("res://game/ending_rules.gd").new()
 
 
+func _roll_chance(probability: float) -> bool:
+	return randf() < clampf(probability, 0.0, 1.0)
+
+
 func advance(game: Game, delta_seconds: float) -> Array[Dictionary]:
 	assert(delta_seconds >= 0.0)
 	if game.run_state != Game.RunState.RUNNING:
@@ -70,6 +74,8 @@ func _apply_running_costs(game: Game) -> void:
 	var total_cost := 0.0
 	for agent in game.agents:
 		if not agent["online"]:
+			continue
+		if agent["has_pending_review"]:
 			continue
 		match agent["type"]:
 			"PLANNER":
@@ -235,6 +241,11 @@ func _execute_tool_step(game: Game, task: Dictionary, events: Array[Dictionary])
 func _execute_review_gate_step(game: Game, task: Dictionary, events: Array[Dictionary]) -> void:
 	var reviewer_id: String = game.flow._first_online_evaluator(game)
 	var ticket: Dictionary = game.flow._create_review_ticket(game, task["id"], reviewer_id)
+	var content_is_good := _roll_review_content_is_good(game, task)
+	ticket["content_quality"] = (
+		Constants.REVIEW_CONTENT_GOOD if content_is_good else Constants.REVIEW_CONTENT_BAD
+	)
+	game.review_tickets[ticket["id"]] = ticket.duplicate(true)
 	(
 		events
 		. append(
@@ -250,10 +261,10 @@ func _execute_review_gate_step(game: Game, task: Dictionary, events: Array[Dicti
 
 	if reviewer_id == "":
 		return
-	if randf() > Constants.EVALUATOR_AUTO_REVIEW_CHANCE:
+	if not _roll_chance(Constants.EVALUATOR_AUTO_REVIEW_CHANCE):
 		return
 
-	var approved := _auto_review_should_approve(game, task)
+	var approved := _auto_review_should_approve(content_is_good)
 	var resolved_event: Dictionary = game.flow._resolve_review_ticket(
 		game, ticket["id"], approved, reviewer_id, "EVALUATOR"
 	)
@@ -338,7 +349,7 @@ func _execute_apply_step(game: Game, task: Dictionary, events: Array[Dictionary]
 	)
 
 
-func _auto_review_should_approve(game: Game, task: Dictionary) -> bool:
+func _roll_review_content_is_good(game: Game, task: Dictionary) -> bool:
 	assert(task.has("planned_with_planner"))
 	assert(task.has("agent_id"))
 	var incident: String = game.flow._active_incident_for_agent(game, task["agent_id"])
@@ -347,8 +358,12 @@ func _auto_review_should_approve(game: Game, task: Dictionary) -> bool:
 		good_probability = 0.55
 	if incident != "":
 		good_probability -= 0.25
-	var judged_good := randf() < good_probability
-	if randf() < Constants.EVALUATOR_AUTO_REVIEW_ERROR_RATE:
+	return _roll_chance(good_probability)
+
+
+func _auto_review_should_approve(content_is_good: bool) -> bool:
+	var judged_good := content_is_good
+	if _roll_chance(Constants.EVALUATOR_AUTO_REVIEW_ERROR_RATE):
 		judged_good = not judged_good
 	return judged_good
 
@@ -362,6 +377,7 @@ func _apply_incident_effects(game: Game, events: Array[Dictionary]) -> void:
 		incident["age_ticks"] += 1
 		game.active_incidents[index] = incident
 		game.entropy += Constants.INCIDENT_TARGET_ENTROPY_GAIN
+		game.stability = maxf(0.0, game.stability - Constants.INCIDENT_TARGET_STABILITY_DAMAGE)
 		(
 			events
 			. append(
@@ -415,7 +431,7 @@ func _generate_incident(game: Game, events: Array[Dictionary]) -> void:
 		Constants.INCIDENT_BASE_CHANCE
 		+ game.entropy / 100.0 * Constants.INCIDENT_CHANCE_BONUS_AT_100_ENTROPY
 	)
-	if randf() > incident_chance:
+	if not _roll_chance(incident_chance):
 		return
 
 	var online_agents: Array[Dictionary] = []

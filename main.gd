@@ -10,8 +10,6 @@ var round_label: Label
 var status_title_label: Label
 var agents_title_label: Label
 var reviews_title_label: Label
-var incidents_title_label: Label
-var incident_hint_label: Label
 var mail_title_label: Label
 var agents_list_container: Control
 var task_slots_container: VBoxContainer
@@ -28,6 +26,7 @@ var login_phase: int = LoginPhase.WAITING_LOGIN
 var pending_review_items: Array[Dictionary] = []
 var system_focus_text: String = ""
 var agent_activity_text: Dictionary = {}
+var startup_sequence_pending := false
 var feed: Feed
 var board: Board
 
@@ -68,8 +67,7 @@ func _ready() -> void:
 	_build_ui()
 	login_phase = LoginPhase.WAITING_LOGIN
 	system_focus_text = ""
-	feed.append_immediate_logs(console.build_boot_logs())
-	_on_login_confirmed()
+	_start_round_intro_sequence()
 	_refresh_chrome()
 
 
@@ -83,8 +81,6 @@ func _build_ui() -> void:
 	status_title_label = ui["status_title_label"]
 	agents_title_label = ui["agents_title_label"]
 	reviews_title_label = ui["reviews_title_label"]
-	incidents_title_label = ui["incidents_title_label"]
-	incident_hint_label = ui["incident_hint_label"]
 	mail_title_label = ui["mail_title_label"]
 	status_name_labels = ui["status_name_labels"]
 	status_value_labels = ui["status_value_labels"]
@@ -112,11 +108,15 @@ func _emit_events(events: Array[Dictionary]) -> void:
 
 
 func _process(delta: float) -> void:
+	var delayed_mail_events := game.advance_delayed_mail(delta)
+	if not delayed_mail_events.is_empty():
+		_emit_events(delayed_mail_events)
 	if game.run_state == Game.RunState.RUNNING and login_phase == LoginPhase.READY:
 		var tick_events := game.advance_time(delta)
 		if not tick_events.is_empty():
 			_emit_events(tick_events)
 	feed.flush(delta)
+	_complete_round_intro_if_ready()
 	_handle_round_transition_if_needed()
 	_refresh_chrome()
 
@@ -226,6 +226,8 @@ func _apply_event_feedback(events: Array[Dictionary]) -> void:
 				system_focus_text = _tf("FOCUS_MUTE_TOGGLED", [event["target"]])
 			"round_ended":
 				system_focus_text = _t("FOCUS_ROUND_ENDED")
+			"mail_delivered":
+				pass
 			_:
 				assert(false, "Unknown event type in _apply_event_feedback")
 
@@ -234,12 +236,13 @@ func _handle_round_transition_if_needed() -> void:
 	if game.run_state != Game.RunState.ENDING:
 		return
 	if game.has_more_rounds():
-		var transition_logs := console.build_round_transition_logs(game)
-		feed.append_immediate_logs(transition_logs)
+		game.begin_next_round()
 		login_phase = LoginPhase.WAITING_LOGIN
 		system_focus_text = _t("FOCUS_NEXT_ROUND")
 		last_agent_board_signature = ""
-		_on_login_confirmed()
+		last_review_signature = ""
+		agent_activity_text.clear()
+		_start_round_intro_sequence()
 		return
 	var final_logs := console.build_round_transition_logs(game)
 	feed.append_immediate_logs(final_logs)
@@ -311,6 +314,13 @@ func _refresh_review_targets() -> void:
 		assert(game.review_tickets.has(ticket_id))
 		var ticket: Dictionary = game.review_tickets[ticket_id]
 		assert(ticket.has("task_id"))
+		assert(ticket.has("content_quality"))
+		assert(
+			(
+				ticket["content_quality"]
+				in [Constants.REVIEW_CONTENT_GOOD, Constants.REVIEW_CONTENT_BAD]
+			)
+		)
 		var task_id: String = ticket["task_id"]
 		assert(game.tasks.has(task_id))
 		var task: Dictionary = game.tasks[task_id]
@@ -323,6 +333,7 @@ func _refresh_review_targets() -> void:
 			"task_id": task_id,
 			"agent_id": agent["id"],
 			"step": task["steps"][task["current_step"]],
+			"content_quality": ticket["content_quality"],
 		}
 		pending_review_items.append(review_item)
 
@@ -334,8 +345,18 @@ func _refresh_review_slots(logged_in: bool) -> void:
 		assert(item.has("task_id"))
 		assert(item.has("agent_id"))
 		assert(item.has("step"))
+		assert(item.has("content_quality"))
 		signature_parts.append(
-			"%s|%s|%s|%s" % [item["ticket_id"], item["task_id"], item["agent_id"], item["step"]]
+			(
+				"%s|%s|%s|%s|%s"
+				% [
+					item["ticket_id"],
+					item["task_id"],
+					item["agent_id"],
+					item["step"],
+					item["content_quality"]
+				]
+			)
 		)
 	var signature := "%s|%s" % [logged_in, ";".join(signature_parts)]
 	if signature == last_review_signature:
@@ -351,8 +372,18 @@ func _refresh_review_slots(logged_in: bool) -> void:
 
 
 func _append_event_logs(events: Array[Dictionary]) -> void:
-	var mapped_logs := console.map_tick_events(events, game)
-	feed.queue_mapped_logs(mapped_logs)
+	var immediate_events: Array[Dictionary] = []
+	var queued_events: Array[Dictionary] = []
+	for event in events:
+		assert(event.has("type"))
+		if event["type"] == "mail_delivered":
+			immediate_events.append(event)
+			continue
+		queued_events.append(event)
+	if not immediate_events.is_empty():
+		feed.append_immediate_logs(console.map_tick_events(immediate_events, game))
+	if not queued_events.is_empty():
+		feed.queue_mapped_logs(console.map_tick_events(queued_events, game))
 
 
 func _on_mail_selected(index: int) -> void:
@@ -361,13 +392,11 @@ func _on_mail_selected(index: int) -> void:
 
 func _refresh_locale_ui() -> void:
 	title_label.text = tr("TITLE")
-	hotkey_hint_label.text = ""
+	hotkey_hint_label.text = tr("HOTKEY_HINT")
 	status_title_label.text = tr("STATUS")
 	agents_title_label.text = tr("AGENTS")
 	reviews_title_label.text = tr("REVIEWS")
-	incidents_title_label.text = tr("INCIDENTS")
 	mail_title_label.text = tr("MAIL")
-	incident_hint_label.text = tr("INCIDENT_PANEL_HINT")
 	for key in status_name_labels.keys():
 		var label: Label = status_name_labels[key]
 		assert(label != null)
@@ -379,11 +408,12 @@ func _refresh_locale_ui() -> void:
 
 func _refresh_agent_board(logged_in: bool) -> void:
 	var snapshot: Array[Dictionary] = []
-	for agent in game.get_agent_snapshot():
-		assert(agent.has("online"))
-		if not agent["online"]:
-			continue
-		snapshot.append(agent)
+	if logged_in:
+		for agent in game.get_agent_snapshot():
+			assert(agent.has("online"))
+			if not agent["online"]:
+				continue
+			snapshot.append(agent)
 	last_agent_board_signature = (
 		board
 		. refresh_agent_board(
@@ -449,15 +479,46 @@ func _resolve_review_for_ticket(ticket_id: String, approved: bool) -> void:
 	_emit_events(events)
 
 
-func _on_login_confirmed() -> void:
+func _start_round_intro_sequence() -> void:
 	assert(login_phase == LoginPhase.WAITING_LOGIN)
 	assert(game.run_state == Game.RunState.BOOTING)
+	var intro_logs: Array[Dictionary] = []
+	intro_logs.append_array(console.build_boot_logs())
 	var login_logs := console.finish_boot_and_build_login_logs(game)
 	assert(not login_logs.is_empty())
-	feed.append_immediate_logs(login_logs)
+	var delayed_boss_first_logs: Array[Dictionary] = []
+	var delayed_colleague_logs: Array[Dictionary] = []
+	var boss_first_delayed := false
+	for item in login_logs:
+		assert(item.has("event_key"))
+		var event_key: String = item["event_key"]
+		if event_key == "BOSS" and not boss_first_delayed:
+			delayed_boss_first_logs.append(item)
+			boss_first_delayed = true
+			continue
+		if (
+			event_key in Constants.USER_KEYS_BY_ROUND
+			or event_key == Constants.PREVIOUS_USER_KEY_DEFAULT
+		):
+			delayed_colleague_logs.append(item)
+			continue
+		intro_logs.append(item)
+	feed.queue_mapped_logs(intro_logs)
+	game.queue_delayed_mail_logs(delayed_boss_first_logs, Constants.BOSS_FIRST_MAIL_DELAY_SECONDS)
+	game.queue_delayed_mail_logs(delayed_colleague_logs, Constants.COLLEAGUE_MAIL_DELAY_SECONDS)
+	startup_sequence_pending = true
+
+
+func _complete_round_intro_if_ready() -> void:
+	if not startup_sequence_pending:
+		return
+	if not feed.is_idle():
+		return
+	assert(game.run_state == Game.RunState.BOOTING)
+	game.finish_boot()
+	startup_sequence_pending = false
 	login_phase = LoginPhase.READY
 	system_focus_text = _t("FOCUS_ROUND_STARTED")
-	_refresh_chrome()
 
 
 func _on_review_slot_approve_pressed(ticket_id: String) -> void:

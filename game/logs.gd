@@ -3,6 +3,8 @@ extends RefCounted
 
 var copybook: Copybook
 var text
+var review_level_override_remaining := 0
+var review_level_override_target := Console.LogLevel.INFO
 
 
 func _init(copybook_ref: Copybook) -> void:
@@ -15,21 +17,22 @@ func map(events: Array, game) -> Array[Dictionary]:
 	var logs: Array[Dictionary] = []
 	for event in events:
 		assert(event.has("type"))
+		var mapped_entries: Array[Dictionary] = []
 		match event["type"]:
 			"status_requested":
-				logs.append(_status_log(event["snapshot"]))
+				mapped_entries.append(_status_log(event["snapshot"]))
 			"agents_requested":
-				logs.append(_agents_summary_log(event["snapshot"]))
+				mapped_entries.append(_agents_summary_log(event["snapshot"]))
 			"incidents_requested":
-				logs.append(_incidents_summary_log(event["snapshot"]))
+				mapped_entries.append(_incidents_summary_log(event["snapshot"]))
 			"inspect_requested":
-				logs.append_array(_inspect_logs(event["payload"]))
+				mapped_entries.append_array(_inspect_logs(event["payload"]))
 			"trust_toggled":
-				logs.append(text.simple_system_log("TRUST_TOGGLED", [event["target"]]))
+				mapped_entries.append(text.simple_system_log("TRUST_TOGGLED", [event["target"]]))
 			"mute_toggled":
-				logs.append(text.simple_system_log("MUTE_TOGGLED", [event["target"]]))
+				mapped_entries.append(text.simple_system_log("MUTE_TOGGLED", [event["target"]]))
 			"agent_killed":
-				logs.append(
+				mapped_entries.append(
 					text.entry(
 						Console.LogLevel.WARN,
 						"SYSTEM",
@@ -39,42 +42,77 @@ func map(events: Array, game) -> Array[Dictionary]:
 					)
 				)
 			"agent_ran":
-				logs.append(text.simple_system_log("AGENT_RAN", [event["target"]]))
+				mapped_entries.append(text.simple_system_log("AGENT_RAN", [event["target"]]))
 			"incident_patched":
-				logs.append(
+				mapped_entries.append(
 					text.simple_system_log("INCIDENT_PATCHED", [event["incident"], event["target"]])
 				)
 			"review_resolved":
-				logs.append(_review_resolved_log(event))
+				mapped_entries.append(_review_resolved_log(event))
 			"task_planned":
-				logs.append(_task_planned_log(event, game))
+				mapped_entries.append(_task_planned_log(event, game))
 			"task_step_started":
-				logs.append(_task_step_log(event))
+				mapped_entries.append(_task_step_log(event))
 			"tool_completed":
-				logs.append(_tool_completed_log(event, game))
+				mapped_entries.append(_tool_completed_log(event, game))
 			"review_requested":
-				logs.append(_review_requested_log(event))
+				mapped_entries.append(_review_requested_log(event))
 			"task_applied":
-				logs.append(_task_applied_log(event, game))
+				mapped_entries.append(_task_applied_log(event, game))
 			"task_canceled":
-				logs.append(_task_canceled_log(event))
+				mapped_entries.append(_task_canceled_log(event))
 			"task_replanned":
-				logs.append(_task_replanned_log(event))
+				mapped_entries.append(_task_replanned_log(event))
 			"replan_skipped":
-				logs.append(_replan_skipped_log(event))
+				mapped_entries.append(_replan_skipped_log(event))
 			"incident_created":
-				logs.append(_incident_created_log(event))
+				mapped_entries.append(_incident_created_log(event))
 			"incident_applied":
-				logs.append(_incident_applied_log(event))
+				mapped_entries.append(_incident_applied_log(event))
 			"round_ended":
-				logs.append_array(_ending_logs(event["outcome"]))
+				mapped_entries.append_array(_ending_logs(event["outcome"]))
+			"mail_delivered":
+				assert(event.has("log"))
+				mapped_entries.append(event["log"])
 			_:
 				assert(false, "Unknown event type in Logs.map")
+		for entry in mapped_entries:
+			logs.append(_apply_review_level_override(entry))
+		if event["type"] == "review_resolved":
+			_update_review_level_override_from_review_event(event)
 	return logs
 
 
 func map_tick(events: Array, game) -> Array[Dictionary]:
 	return map(events, game)
+
+
+func _apply_review_level_override(entry: Dictionary) -> Dictionary:
+	assert(entry.has("level"))
+	if review_level_override_remaining <= 0:
+		return entry
+	if int(entry["level"]) != Console.LogLevel.INFO:
+		return entry
+	var adjusted := entry.duplicate(true)
+	adjusted["level"] = review_level_override_target
+	review_level_override_remaining -= 1
+	return adjusted
+
+
+func _update_review_level_override_from_review_event(event: Dictionary) -> void:
+	assert(event.has("approved"))
+	assert(event.has("content_quality"))
+	var content_quality: String = str(event["content_quality"])
+	assert(content_quality in [Constants.REVIEW_CONTENT_GOOD, Constants.REVIEW_CONTENT_BAD])
+	if event["approved"] and content_quality == Constants.REVIEW_CONTENT_BAD:
+		review_level_override_target = Console.LogLevel.CRIT
+		review_level_override_remaining = Constants.REVIEW_DECISION_IMPACT_LOG_COUNT
+		return
+	if (not event["approved"]) and content_quality == Constants.REVIEW_CONTENT_GOOD:
+		review_level_override_target = Console.LogLevel.WARN
+		review_level_override_remaining = Constants.REVIEW_DECISION_IMPACT_LOG_COUNT
+		return
+	review_level_override_remaining = 0
 
 
 func _status_log(snapshot: Dictionary) -> Dictionary:
