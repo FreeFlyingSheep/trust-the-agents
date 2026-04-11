@@ -2,7 +2,7 @@ class_name Constants
 extends Node
 
 # Metadata
-const VERSION := "v0.5.0"
+const VERSION := "v0.5.1"
 const RANDOM_SEED := 271828
 
 # Core run configuration

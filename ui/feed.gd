@@ -190,12 +190,12 @@ func _collect_mail_notification(item: Dictionary) -> void:
 			if seen_incident_mail_ids.has(incident_id):
 				return
 			seen_incident_mail_ids[incident_id] = true
-		_upsert_mail("notifier", "NOTIFIER", "MAIL_SUBJECT_NOTIFIER", item, false)
+		_upsert_mail("notifier", "NOTIFIER", "MAIL_SUBJECT_NOTIFIER", item)
 		return
 	if item["event_key"] == "BOSS":
-		_upsert_mail("boss", "BOSS", "MAIL_SUBJECT_BOSS", item, true)
+		_upsert_mail("boss", "BOSS", "MAIL_SUBJECT_BOSS", item)
 		return
-	_upsert_mail("colleague", "COLLEAGUE", "MAIL_SUBJECT_COLLEAGUE", item, true)
+	_upsert_mail("colleague", "COLLEAGUE", "MAIL_SUBJECT_COLLEAGUE", item)
 
 
 func _incident_notice_id(item: Dictionary) -> String:
@@ -217,28 +217,12 @@ func _upsert_mail(
 	bucket: String,
 	sender_key: String,
 	subject_key: String,
-	body_item: Dictionary,
-	merge_existing: bool
+	body_item: Dictionary
 ) -> void:
 	assert(not bucket.is_empty())
 	assert(not sender_key.is_empty())
 	assert(not subject_key.is_empty())
 	assert(not body_item.is_empty())
-	if merge_existing:
-		for index in range(mail_items.size()):
-			if mail_items[index]["bucket"] != bucket:
-				continue
-			var body_items: Array = mail_items[index]["body_items"]
-			body_items.append(body_item.duplicate(true))
-			mail_items[index]["body_items"] = body_items
-			mail_items[index]["updated_at"] = mail_updated_at_counter
-			mail_updated_at_counter += 1
-			var updated: Dictionary = mail_items[index]
-			mail_items.remove_at(index)
-			mail_items.append(updated)
-			_sort_mail_items_by_time_desc()
-			selected_mail_index = _index_for_bucket(bucket)
-			return
 	(
 		mail_items
 		. append(
